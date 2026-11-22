@@ -78,7 +78,10 @@ def main():
     if not match:
         raise RuntimeError("cannot find project default template threshold")
     default_threshold = float(match.group(1))
-    names = ["Roguelike@QuickFormation", "Roguelike@FormationConfirm"]
+    quick = "Roguelike@QuickFormation"
+    confirm = "Roguelike@FormationConfirm"
+    ready = "Roguelike@FormationReady"
+    names = [quick, confirm, ready]
     # TaskData implicitly derives an @-qualified task from any existing suffix.
     # Reject competing definitions and suffix bases across the entire supplied tree.
     suffixes = {name[i + 1 :] for name in names for i, c in enumerate(name) if c == "@"}
@@ -96,8 +99,18 @@ def main():
                 or any(key.endswith("@" + name) for name in names)
             ):
                 raise RuntimeError(f"ambiguous task definition {key} in {path}")
-    if tasks[names[0]].get("next") != [names[1]]:
-        raise RuntimeError("QuickFormation next changed; review this probe")
+    if (
+        tasks[quick].get("next") != [ready, quick]
+        or tasks[quick].get("maxTimes") != 2
+        or tasks[quick].get("exceededNext") != [ready]
+        or tasks[ready].get("baseTask") != confirm
+        or tasks[ready].get("template") != confirm + ".png"
+        or tasks[ready].get("action") != "DoNothing"
+        or tasks[ready].get("reduceOtherTimes") != []
+        or tasks[ready].get("next") != [confirm]
+        or tasks[confirm].get("reduceOtherTimes") != [f"{quick}*2"]
+    ):
+        raise RuntimeError("QuickFormation retry flow changed; review this probe")
     prefix = Path(
         os.environ.get(
             "MAA_OPENCV_PREFIX",
@@ -126,7 +139,7 @@ def main():
             check=True,
         )
         results = {}
-        for name in names:
+        for name in (quick, confirm):
             task = tasks[name]
             if "baseTask" in task:
                 raise RuntimeError(
@@ -172,7 +185,7 @@ def main():
             print(
                 f"{name}: score={score} threshold={used_threshold} match={bool(int(passed))} rect={rect} roi={roi}"
             )
-    mismatch = results[names[0]] and not results[names[1]]
+    mismatch = results[quick] and not results[confirm]
     print(f"QuickFormation present / FormationConfirm absent: {mismatch}")
     print("RoguelikeFormationOper: unsupported masked project matcher; not measured.")
     print(

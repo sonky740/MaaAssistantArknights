@@ -23,7 +23,7 @@ bool asst::RoguelikeFormationTaskPlugin::verify(AsstMsg msg, const json::value& 
     if (task_view.starts_with(roguelike_name)) {
         task_view.remove_prefix(roguelike_name.length());
     }
-    if (task_view == "Roguelike@QuickFormation") {
+    if (task_view == "Roguelike@FormationReady") {
         return true;
     }
     else {
