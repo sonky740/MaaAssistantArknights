@@ -1438,6 +1438,24 @@ Tag 等級（大於等於 3）對應的期望招募時限（單位：分鐘）�
 
 </details>
 
+- `OperProgress` 幹員培養
+
+以下計畫將娜仁圖亞培養至精英二、60 級、技能等級 7。`name` 使用遊戲資源中的簡體中文幹員名稱。
+
+```json
+{
+  "plans": [
+    {"name": "娜仁图亚", "elite": 2, "level": 60, "skill_level": 7, "allow_chip_purchase": false}
+  ]
+}
+```
+
+指定 `level` 時也需指定精英化階段 `elite`。等級上限取決於稀有度與精英化階段。僅指定 `elite` 時，會將幹員晉升至該階段。`skill_mastery` 的三個元素分別指定各技能的目標專精等級，範圍為 0–3。0 表示略過該技能。`allow_chip_purchase` 預設為 true。設為 false 後，即使缺少晶片助劑也不會消耗採購憑證。
+
+僅讀取現況時，在最上層設定 `"inspect_only": true`。`inspection_skill` 指定要檢查專精的技能編號 1–3，預設值 0 表示不檢查專精。辨識成功後，`OperProgressInspection` 會回傳幹員 ID、精英化階段、等級、技能等級和專精等級。僅在辨識出目前等級已累積的經驗時回傳 `exp`。可以專精時，未檢查的技能會回傳 -1。
+
+確認已開始製造後若雙晶片數量仍不足，`OperProgressDetail` 的 `result_detail` 為 `ChipManufacturing`。請在確認晶片已入庫後繼續。專精的 `Completed` 表示已啟動目標等級的訓練。訓練結束後，請再次讀取幹員狀態以確認專精是否完成。
+
 - `Reclamation`  
   生息演算
 

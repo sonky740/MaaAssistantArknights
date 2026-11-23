@@ -10,6 +10,7 @@ struct OperBoxInfo
     std::string id;
     std::string name;
     int level = 0;     // 等级
+    bool level_recognized = false;
     int elite = 0;     // 精英度
     int potential = 0; // 潜能
     int rarity = 0;    // 稀有度
@@ -67,7 +68,6 @@ public:
     const auto& get_result() const noexcept { return m_result; }
 
 private:
-    int level_num(const std::string& level);
     bool analyzer_oper_box();
     // 获取lv rect
     bool opers_analyze();

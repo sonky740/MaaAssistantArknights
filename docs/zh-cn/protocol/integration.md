@@ -1437,6 +1437,24 @@ Tag 等级（大于等于 3）和对应的希望招募时限，单位为分钟�
 
 </details>
 
+- `OperProgress` 干员培养
+
+以下计划将娜仁图亚培养至精英二、60 级、技能等级 7。`name` 使用游戏资源中的简体中文干员名。
+
+```json
+{
+  "plans": [
+    {"name": "娜仁图亚", "elite": 2, "level": 60, "skill_level": 7, "allow_chip_purchase": false}
+  ]
+}
+```
+
+指定 `level` 时还需指定精英化阶段 `elite`。等级上限取决于稀有度和精英化阶段。仅指定 `elite` 时，会将干员晋升至该阶段。`skill_mastery` 的三个元素分别指定各技能的目标专精等级，范围为 0–3。0 表示跳过该技能。`allow_chip_purchase` 默认为 true。设为 false 后，即使缺少芯片助剂也不会消耗采购凭证。
+
+仅读取现状时，在顶层设置 `"inspect_only": true`。`inspection_skill` 指定要检查专精的技能序号 1–3，默认值 0 表示不检查专精。识别成功后，`OperProgressInspection` 返回干员 ID、精英化阶段、等级、技能等级和专精等级。仅在识别到当前等级已积累的经验时返回 `exp`。可以专精时，未检查的技能返回 -1。
+
+确认已开始制造后若双芯片数量仍不足，`OperProgressDetail` 的 `result_detail` 为 `ChipManufacturing`。确认芯片已入库后再继续。专精的 `Completed` 表示已启动目标等级的训练。训练结束后需要再次读取干员状态，以确认已完成专精。
+
 - `Reclamation`  
   生息演算
 

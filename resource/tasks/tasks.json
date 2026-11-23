@@ -6363,6 +6363,51 @@
         "postDelay": 500,
         "next": ["OperProgress@LevelUpPageSelectMax", "OperProgress@CannotEnterLevelUpPage"]
     },
+    "OperProgress@LevelDialOpen": {
+        "baseTask": "OperProgress@LevelUpPageEnter",
+        "template": "OperFilesEnterLevelUpButton.png",
+        "next": []
+    },
+    "OperProgress@CurrentExpFraction": {
+        "baseTask": "NumberOcrReplace",
+        "binThreshold": [85, 255],
+        "roi": [431, 438, 130, 24]
+    },
+    "OperProgress@ReturnFromSkillPage": {
+        "baseTask": "OperProgress@SkillUpPage",
+        "template": "EliteUpPageConfirm.png",
+        "next": ["OperProgress@ReturnToOperFilesPage"]
+    },
+    "OperProgress@VerifyProductChangedToChip": {
+        "baseTask": "VerifyProductChangedToPureGold",
+        "template": "InfrastMfgChipFlag.png"
+    },
+    "OperProgress@LevelDialNumber": {
+        "baseTask": "NumberOcrReplace",
+        "roi": [846, 282, 145, 98]
+    },
+    "OperProgress@LevelPreviewNumber": {
+        "baseTask": "NumberOcrReplace",
+        "roi": [698, 402, 43, 32]
+    },
+    "OperProgress@LevelDialIncrease": {
+        "algorithm": "JustReturn",
+        "action": "Swipe",
+        "specificRect": [920, 168, 1, 1],
+        "rectMove": [920, 331, 1, 1],
+        "specialParams": [550],
+        "postDelay": 600
+    },
+    "OperProgress@LevelDialDecrease": {
+        "baseTask": "OperProgress@LevelDialIncrease",
+        "specificRect": [920, 331, 1, 1],
+        "rectMove": [920, 168, 1, 1]
+    },
+    "OperProgress@LevelDialConfirm2": {
+        "baseTask": "OperProgress@LevelUpPageConfirm2",
+        "template": "LevelUpPageConfirm2.png",
+        "next": ["OperProgress@OperFiles"]
+    },
     "OperProgress@LevelUpPageSelectMax": {
         "template": "LevelUpPageSelectMax.png",
         "action": "ClickSelf",

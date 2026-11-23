@@ -1439,6 +1439,24 @@ Sarkaz 테마, Investment 모드, "연금술 분대" 또는 "지원 분대"일 �
 
 </details>
 
+- `OperProgress` 오퍼레이터 육성
+
+다음 계획은 나란투야를 정예 2, 레벨 60, 공통 스킬 랭크 7까지 육성합니다. 본체는 `name`으로 게임 리소스의 중국어 이름을 받습니다.
+
+```json
+{
+  "plans": [
+    {"name": "娜仁图亚", "elite": 2, "level": 60, "skill_level": 7, "allow_chip_purchase": false}
+  ]
+}
+```
+
+`level`을 지정할 때는 정예 단계 `elite`도 지정합니다. 허용 레벨은 희귀도와 정예 단계에 따라 다릅니다. `elite`만 지정하면 해당 단계로 승급합니다. `skill_mastery`는 세 스킬 슬롯별 전문화 목표 0–3을 받습니다. 0인 슬롯은 건너뜁니다. `allow_chip_purchase`의 기본값은 true입니다. false이면 칩 촉매가 부족해도 구매증명서를 사용하지 않습니다.
+
+현재 상태만 읽으려면 최상위 매개변수에 `"inspect_only": true`를 추가합니다. `inspection_skill`은 읽을 전문화 슬롯 1–3을 받습니다. 기본값 0은 전문화를 확인하지 않습니다. 판독에 성공하면 본체가 `OperProgressInspection`으로 오퍼레이터 ID, 정예 단계, 레벨, 스킬 랭크, 전문화를 전달합니다. `exp`는 현재 레벨의 누적 경험치를 판독했을 때만 포함합니다. 전문화 가능 상태에서 점검하지 않은 슬롯은 -1입니다.
+
+제조를 확인한 뒤 듀얼 칩이 아직 부족하면 `OperProgressDetail`의 `result_detail`이 `ChipManufacturing`입니다. 창고에서 칩 수령을 확인한 뒤 이어서 진행합니다. 전문화의 `Completed`는 목표 등급 훈련을 시작했다는 뜻입니다. 훈련이 끝난 뒤 오퍼레이터 상태를 다시 읽어야 완료를 확인할 수 있습니다.
+
 - `Reclamation`  
   생존 연산
 

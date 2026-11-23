@@ -1,5 +1,7 @@
 #include "OperBoxImageAnalyzer.h"
 
+#include "Utils/StringMisc.hpp"
+
 #include "Common/AsstTypes.h"
 #include "Config/Miscellaneous/BattleDataConfig.h"
 #include "Config/TaskData.h"
@@ -25,14 +27,6 @@ bool asst::OperBoxImageAnalyzer::analyze()
     }
 
     return ret;
-}
-
-int asst::OperBoxImageAnalyzer::level_num(const std::string& level)
-{
-    if (level.empty() || !std::ranges::all_of(level, [](const char& c) -> bool { return std::isdigit(c); })) {
-        return 1;
-    }
-    return std::stoi(level);
 }
 
 bool asst::OperBoxImageAnalyzer::analyzer_oper_box()
@@ -207,7 +201,10 @@ bool asst::OperBoxImageAnalyzer::level_analyze()
         }
         const auto& ocr_result = level_analyzer.get_result();
         const std::string& level = ocr_result.text;
-        box.level = level_num(level);
+        box.level_recognized = utils::chars_to_number<int, true>(level, box.level) && box.level > 0 && box.level <= 90;
+        if (!box.level_recognized) {
+            box.level = 1;
+        }
 #ifdef ASST_DEBUG
         cv::rectangle(m_image_draw, make_rect<cv::Rect>(ocr_result.rect), cv::Scalar(0, 255, 0), 1);
         cv::putText(

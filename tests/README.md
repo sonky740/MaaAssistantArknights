@@ -18,3 +18,7 @@ sh tests/run_native_roguelike_replays.sh "$overview_png" "$panel_png" "$reward_p
 ```
 
 The runner links to the actual matcher and task plugins. A test controller supplies frames and records input without connecting to an emulator. Each case stores its log in the temporary directory printed by the runner. For a separately staged build, set `MAA_CORE_SOURCE` to its matching headers, `MAA_DEBUG_LIB_DIR` to its Debug libraries and `MAA_RESOURCE_DIR` to the directory containing the packaged `resource` folder. The controller probes use `-fno-access-control` only in the test translation units.
+
+## Native operator progression replay on macOS arm64
+
+With the same Debug build, run `sh tests/run_oper_progress_level_replay.sh`. The fixture checks plan validation, strict inspection, level-dial movement and skill rank confirmation using a local controller. To exercise both level number regions on a captured level-selection screen, pass its path and the displayed target, for example `sh tests/run_oper_progress_level_replay.sh "$dial_png" 60`. The test loads the Korean resource overlay.

@@ -10,6 +10,8 @@
 
 namespace asst
 {
+struct OperBoxInfo;
+
 class OperProgressProcessTask final : public AbstractTask
 {
 public:
@@ -35,6 +37,7 @@ private:
         TrainingRoomBusy,     // 训练室已被其他干员占用
         PrerequisiteTraining, // 执行前置专精训练, 如要求专三, 正在进行专二
         Interrupt,            // 任务中断
+        ChipManufacturing,
     };
 
     enum class Result
@@ -48,21 +51,33 @@ public:
     using AbstractTask::AbstractTask;
     virtual ~OperProgressProcessTask() override = default;
 
-    void set_plan(std::vector<OperProgressTask::ProgressPlan> plan) { m_plan = std::move(plan); }
+    void set_plan(std::vector<OperProgressTask::ProgressPlan> plan, bool inspect, int slot)
+    {
+        m_plan = std::move(plan);
+        m_inspect_only = inspect;
+        m_inspection_skill = slot;
+    }
 
 protected:
     virtual bool _run() override;
 
 private:
-    ResultDetail execute_elite(battle::Role role, const std::string& name, int target);
-    void report_elite_result(battle::Role role, std::string_view name, ResultDetail result, int elite);
+    ResultDetail execute_elite(battle::Role role, const std::string& name, int target, bool allow_chip_purchase);
+    ResultDetail select_level_target(int current, int target);
+    ResultDetail execute_level(battle::Role role, const std::string& name, int phase, int target, int current);
+    void report_elite_result(
+        battle::Role role,
+        std::string_view name,
+        ResultDetail result,
+        int elite,
+        std::optional<int> level);
     ResultDetail execute_skill(int level);
     void report_skill_result(battle::Role role, std::string_view name, ResultDetail result, int level);
     // 返回 Completed 时 training_level 为本次训练完成后达到的专精等级；专精需要训练时长，启动不代表达到计划目标。
     ResultDetail
         execute_mastery(battle::Role role, std::string_view name, int skill, int target_level, int& current_level);
     void report_skill_result(battle::Role role, std::string_view name, ResultDetail result, std::array<int, 3> level);
-    ResultDetail find_and_open_operator(battle::Role role, std::string_view name);
+    ResultDetail find_and_open_operator(battle::Role role, std::string_view name, OperBoxInfo* card = nullptr);
     bool select_role(battle::Role role);
     bool analyze_training_context(std::string& operator_name, std::string& skill_name, int& level);
     bool select_training_trainee(battle::Role role, std::string_view name);
@@ -78,17 +93,24 @@ private:
     // 返回 FormulaLocked 表示该材料在快速跳转弹窗中的配方尚未解锁,调用方应据此跳过当前任务。
     ResultDetail synthesize_missing_material(OperProgressAction task_type, int material_index);
     bool record_factory_state();
-    bool manufacture_dual_chip(battle::Role role, const std::string& name);
+    ResultDetail manufacture_dual_chip(battle::Role role, const std::string& name, bool allow_chip_purchase);
     bool restore_factory_state(); // 合成后恢复制造站产品
     bool buy_catalyst(int count);
     std::optional<int> ocr_number(const std::string& task_name);
     std::optional<int> ocr_number(const cv::Mat& image, const std::string& task_name);
 
+    std::optional<int> dial_experience(const cv::Mat& image);
+    std::optional<int> selected_level(const cv::Mat& image);
+
+    std::optional<int> strict_number(const cv::Mat& image, const char* task, int minimum = 1);
+    bool inspect_operator(const OperBoxInfo& card, battle::Role role);
     void report_summary();
 
     std::vector<OperProgressTask::ProgressPlan> m_plan;
     std::vector<OperProgressTask::ProgressPlan> m_plan_finish;
 
+    bool m_inspect_only = false;
+    int m_inspection_skill = 0;
     bool m_entry_completed = false; // 首条目标已定位:任务开始时可能停在主页走完整入口链,之后换干员保证不去主页。
     int m_success = 0;
     int m_failed = 0;

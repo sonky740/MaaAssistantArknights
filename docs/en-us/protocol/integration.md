@@ -1438,6 +1438,24 @@ Whether to enable this task.
 
 </details>
 
+- `OperProgress` Operator progression
+
+This plan raises Narantuya to Elite 2, level 60, and shared skill rank 7. Use the Chinese operator name from the game resources for `name`.
+
+```json
+{
+  "plans": [
+    {"name": "娜仁图亚", "elite": 2, "level": 60, "skill_level": 7, "allow_chip_purchase": false}
+  ]
+}
+```
+
+When specifying `level`, also specify the elite phase in `elite`. The level cap depends on rarity and phase. Providing only `elite` promotes the operator to that phase. The three entries in `skill_mastery` specify the target mastery for each skill slot, from 0 to 3. Zero skips the slot. `allow_chip_purchase` defaults to true. Set it to false to prevent spending Purchase Certificates on missing Chip Catalysts.
+
+For a read-only inspection, set the top-level parameter `"inspect_only": true`. Set `inspection_skill` to a slot from 1 to 3 to inspect its mastery. The default, 0, skips mastery inspection. A successful inspection emits `OperProgressInspection` with the operator ID, elite phase, level, skill rank, and mastery. The optional `exp` field reports recognized EXP accumulated toward the next level. When mastery is available, uninspected slots are reported as -1.
+
+If Dualchips are still missing after the core confirms production, `OperProgressDetail` reports `ChipManufacturing` in `result_detail`. Verify receipt in the depot before resuming. For mastery, `Completed` means training for the target rank has started. Inspect the operator again after training ends to verify completion.
+
 - `Reclamation`  
   Reclamation Algorithm
 
