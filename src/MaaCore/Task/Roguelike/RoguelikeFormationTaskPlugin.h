@@ -20,13 +20,16 @@ public:
 protected:
     virtual bool _run() override;
 
-    void clear_and_reselect();
+    bool on_run_fails() override { return !m_reselect_started; }
+
+    bool clear_and_reselect();
     bool analyze();
     bool select(RoguelikeFormationImageAnalyzer::FormationOper oper);
     void swipe_to_first_page();
     void scan_oper();
 
 private:
+    bool m_reselect_started = false;
     int cur_page = 1;
     int max_page = 1;
     std::vector<RoguelikeFormationImageAnalyzer::FormationOper> oper_list;

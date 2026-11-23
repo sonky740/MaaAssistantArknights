@@ -68,6 +68,7 @@ public:
     ControllerAPI* get_underlying() const noexcept { return m_controller.get(); }
 
     cv::Mat get_image(bool raw = false);
+    cv::Mat get_image_if_available(bool raw = false);
     cv::Mat get_image_cache() const;
     cv::Mat get_preview_image_cache() const;
     bool screencap(bool allow_reconnect = false);
@@ -111,6 +112,7 @@ public:
     bool back_to_home();
 
 private:
+    cv::Mat capture_image(bool raw, bool require_fresh);
     cv::Mat get_resized_image_cache(bool for_preview = false) const;
 
     void clear_info() noexcept;
