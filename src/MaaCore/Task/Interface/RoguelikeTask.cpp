@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include <opencv2/imgproc.hpp>
+
 #include "Common/AsstBattleDef.h"
 #include "Config/TaskData.h"
 #include "Task/ProcessTask.h"
@@ -56,6 +58,89 @@
 #include "Task/Roguelike/BlackFlow/BlackFlowTaskPort.h"
 
 #include "Utils/Logger.hpp"
+#include "Vision/OCRer.h"
+
+namespace
+{
+struct EncounterButton
+{
+    int clicks = 0;
+    std::string label;
+    cv::Mat text_image;
+    std::unordered_map<std::string, int> previous_labels;
+};
+
+class EncounterClickGuard
+{
+public:
+    bool operator()(const asst::TaskInfo& task, const asst::Rect& hit, const cv::Mat* image)
+    {
+        const std::string_view name = task.name;
+        const bool confirm = name.ends_with("@StageEncounterLeaveConfirm");
+        if (!name.ends_with("@StageEncounterOptionLeave") && !confirm && !name.ends_with("@StageEncounterOptionFree") &&
+            !name.ends_with("@StageEncounterOptionUnknown")) {
+            // Passive recognizers such as Sami's StagesChaosZero also match an unchanged encounter.
+            if (task.action != asst::ProcessTaskAction::DoNothing || name.ends_with("@StageEncounterJudgeOption")) {
+                m_buttons.clear();
+                m_confirmations.clear();
+                m_option_label.clear();
+            }
+            return true;
+        }
+
+        // The confirmation itself is identical across different option pages.
+        auto& button = confirm ? m_confirmations[m_option_label] : m_buttons[task.name];
+        if ((!confirm || m_option_label.empty()) && image && !image->empty()) {
+            // Only the option row can identify a new page. Background animation and button jitter cannot.
+            const cv::Rect row = cv::Rect(800, hit.y - 10, 480, hit.height + 20) & cv::Rect({}, image->size());
+            if (!row.empty()) {
+                const cv::Rect icon = asst::make_rect<cv::Rect>(hit) - row.tl();
+                if (update_label(button, (*image)(row), icon) && !confirm) {
+                    m_option_label = button.label;
+                }
+            }
+        }
+        return ++button.clicks <= 2;
+    }
+
+private:
+    static bool update_label(EncounterButton& button, const cv::Mat& row, const cv::Rect& icon)
+    {
+        if (!button.text_image.empty() && row.cols >= button.text_image.cols && row.rows >= button.text_image.rows) {
+            cv::Mat scores;
+            cv::matchTemplate(row, button.text_image, scores, cv::TM_CCOEFF_NORMED);
+            double best = 0;
+            cv::minMaxLoc(scores, nullptr, &best);
+            if (best >= 0.75) {
+                return true;
+            }
+        }
+        asst::OCRer reader(row);
+        auto words = reader.analyze();
+        if (!words) {
+            return false;
+        }
+        std::erase_if(*words, [&](const auto& word) {
+            return word.score < 0.9 || !(icon & asst::make_rect<cv::Rect>(word.rect)).empty();
+        });
+        if (words->size() == 1) {
+            const auto& word = words->front();
+            if (!button.label.empty() && word.text != button.label) {
+                button.previous_labels[button.label] = button.clicks;
+                button.clicks = button.previous_labels[word.text];
+            }
+            button.label = word.text;
+            button.text_image = row(asst::make_rect<cv::Rect>(word.rect)).clone();
+            return true;
+        }
+        return false;
+    }
+
+    std::unordered_map<std::string, EncounterButton> m_buttons;
+    std::unordered_map<std::string, EncounterButton> m_confirmations;
+    std::string m_option_label;
+};
+}
 
 asst::RoguelikeTask::RoguelikeTask(const AsstCallback& callback, Assistant* inst) :
     InterfaceTask(callback, inst, TaskType),
@@ -63,6 +148,9 @@ asst::RoguelikeTask::RoguelikeTask(const AsstCallback& callback, Assistant* inst
     m_config_ptr(std::make_shared<RoguelikeConfig>())
 {
     LogTraceFunction;
+    m_roguelike_task_ptr->set_action_guard(EncounterClickGuard {});
+    // BlackFlow's chain-wide maxTimes would return success while the same confirmation is still visible.
+    m_roguelike_task_ptr->set_times_limit("BlackFlow@Roguelike@StageEncounterLeaveConfirm", INT_MAX);
 
     // m_roguelike_task_ptr->set_ignore_error(true);
     m_control_ptr = m_roguelike_task_ptr->register_plugin<RoguelikeControlTaskPlugin>(m_config_ptr);

@@ -14,6 +14,7 @@
 #include "Utils/DebugImageHelper.hpp"
 #include "Utils/Logger.hpp"
 #include "Vision/Matcher.h"
+#include "Vision/MultiMatcher.h"
 #include "Vision/RegionOCRer.h"
 
 namespace
@@ -33,6 +34,80 @@ constexpr std::string_view BlackFlowContinueMapReadyTask = "BlackFlow@Roguelike@
 constexpr std::string_view BlackFlowContinueOptionsReadyTask = "BlackFlow@Roguelike@StageEncounterContinueOptionsReady";
 constexpr std::string_view BlackFlowTitleOcrTask = "BlackFlow@Roguelike@StageEncounterOcr";
 constexpr std::string_view EncounterLoadingCompletedTask = "Roguelike@StageEncounterLoadingCompleted";
+
+asst::TaskPtr recognize_fixed_layout(
+    const std::string& theme,
+    const cv::Mat& image,
+    const asst::RoguelikeStageEncounterConfig::RoguelikeEvent& event,
+    size_t choice)
+{
+    const auto prefix = theme + "@Roguelike@StageEncounterOption";
+    std::vector<int> marker_y;
+    bool has_leave = false;
+    for (const auto& name : asst::Task.get(prefix + "s")->next) {
+        if (!name.starts_with(prefix)) {
+            continue;
+        }
+        asst::MultiMatcher matcher(image);
+        matcher.set_task_info(name);
+        if (const auto matches = matcher.analyze()) {
+            for (const auto& match : *matches) {
+                marker_y.push_back(match.rect.y + match.rect.height / 2);
+            }
+            has_leave |= !matches->empty() && name == prefix + "Leave";
+        }
+    }
+    if (marker_y.empty()) {
+        return nullptr;
+    }
+
+    auto layouts = event.fallback_choices;
+    layouts.emplace_back(event.option_num, choice);
+    auto common_target = cv::Rect(0, 0, image.cols, image.rows);
+    asst::TaskPtr complete;
+    for (const auto& [count, item] : layouts) {
+        // 鲍勃的三个或四个货品均为藏品；单独出现的离开标记不属于货品页。
+        if (count > 1 && event.name == "鲍勃杂货店" && has_leave) {
+            continue;
+        }
+        const auto name = theme + "@Roguelike@OptionChoose" + std::to_string(count) + "-";
+        const auto target = asst::Task.get(name + std::to_string(item));
+        if (!target) {
+            continue;
+        }
+        std::vector<int> remaining = marker_y;
+        size_t seen = 0;
+        for (size_t row = 1; row <= count; ++row) {
+            const auto row_task = asst::Task.get(name + std::to_string(row));
+            if (!row_task) {
+                break;
+            }
+            const auto rect = row_task->specific_rect;
+            const auto in_row = [&](int y) {
+                return rect.y <= y && y < rect.y + rect.height;
+            };
+            if (std::erase_if(remaining, in_row) > 0) {
+                ++seen;
+            }
+        }
+        if (!remaining.empty()) {
+            continue;
+        }
+        const auto rect = target->specific_rect;
+        common_target &= cv::Rect(rect.x, rect.y, rect.width, rect.height);
+        if (seen == count) {
+            complete = target;
+        }
+    }
+    // 有些行坐标重叠。至少一个布局完整，且所有可能布局的目标有交集，才能安全点选。
+    if (!complete || common_target.empty()) {
+        return nullptr;
+    }
+    auto result = std::make_shared<asst::TaskInfo>(*complete);
+    result->specific_rect = { common_target.x, common_target.y, common_target.width, common_target.height };
+    return result;
+}
+
 }
 
 bool asst::RoguelikeStageEncounterTaskPlugin::verify(AsstMsg msg, const json::value& details) const
@@ -81,7 +156,10 @@ bool asst::RoguelikeStageEncounterTaskPlugin::_run()
         return false;
     }
 
-    cv::Mat image = ctrler()->get_image();
+    cv::Mat image = capture_encounter_image();
+    if (image.empty()) {
+        return false;
+    }
     OCRer name_analyzer(image);
     name_analyzer.set_task_info(event_name_task_ptr);
     name_analyzer.set_required(event_names);
@@ -130,7 +208,10 @@ std::optional<std::string> asst::RoguelikeStageEncounterTaskPlugin::handle_singl
 
     const auto& event = it->second;
 
-    cv::Mat image = ctrler()->get_image();
+    cv::Mat image = capture_encounter_image();
+    if (image.empty()) {
+        return std::nullopt;
+    }
 
     int special_val = 0;
     // 水月的不好识别，先试试萨米能不能用
@@ -225,6 +306,28 @@ std::optional<std::string> asst::RoguelikeStageEncounterTaskPlugin::handle_singl
         }
         return m_config->get_theme() + "@Roguelike@OptionChoose" + std::to_string(total) + "-" + std::to_string(item);
     };
+
+    if (theme != RoguelikeTheme::Sarkaz) {
+        auto option = Task.get(click_option_task_name(choose_option, event.option_num));
+        if (!event.fallback_choices.empty()) {
+            image = get_event_image();
+            option = image.empty() ? nullptr : recognize_fixed_layout(theme, image, event, choose_option);
+            if (!option) {
+                if (auto* task = dynamic_cast<ProcessTask*>(m_task_ptr); task && !need_exit()) {
+                    task->request_failure();
+                    LogError << "Encounter option layout is unrecognized" << event.name;
+                    if (!image.empty()) {
+                        save_img(image, "unrecognized option layout");
+                    }
+                }
+                return std::nullopt;
+            }
+        }
+        if (option && select_option_with_confirmation(choose_option - 1, option, image)) {
+            return next_event(event);
+        }
+        return std::nullopt;
+    }
 
     for (int j = 0; j < 2; ++j) {
         ProcessTask(*this, { click_option_task_name(choose_option, event.option_num) }).run();
@@ -344,6 +447,11 @@ int asst::RoguelikeStageEncounterTaskPlugin::hp(const cv::Mat& image) const
 {
     LogTraceFunction;
 
+    if (m_config->get_theme() != RoguelikeTheme::Sarkaz) {
+        Matcher hp_flag(image);
+        hp_flag.set_task_info("Roguelike@HpFlag");
+        return hp_flag.analyze() ? 0 : -1;
+    }
     if (!ProcessTask(*this, { "Roguelike@HpFlag" }).run()) {
         Log.info("Not found HpFlag");
         return -1;
@@ -388,14 +496,20 @@ bool asst::RoguelikeStageEncounterTaskPlugin::update_option_list()
         return false;
     }
 
-    cv::Mat image = ctrler()->get_image();
+    cv::Mat image = capture_encounter_image();
+    if (image.empty()) {
+        return false;
+    }
     RoguelikeEncounterOptionAnalyzer analyzer(image);
     analyzer.set_theme(theme);
     for (size_t swipe_times = 0; swipe_times < MAX_SWIPE_TIMES && !need_exit(); ++swipe_times) {
         if (!move_forward()) {
             return false;
         }
-        image = ctrler()->get_image();
+        image = capture_encounter_image();
+        if (image.empty()) {
+            return false;
+        }
         const std::optional<int> ret = analyzer.merge_image(image);
         if (!ret) {
             return false;
@@ -502,7 +616,9 @@ std::optional<std::string> asst::RoguelikeStageEncounterTaskPlugin::select_black
 
     const auto selected = select_event_option(plan, event.name);
     if (!selected.has_value()) {
-        set_blackflow_result(BlackFlowAbandonTask);
+        if (const auto* task = dynamic_cast<ProcessTask*>(m_task_ptr); task && !task->failure_requested()) {
+            set_blackflow_result(BlackFlowAbandonTask);
+        }
         return std::nullopt;
     }
     // 保留黑流确认完成后的页面稳定等待，再记录策略结果。
@@ -560,7 +676,7 @@ std::optional<asst::RoguelikeStageEncounterTaskPlugin::SelectedOption>
             return std::nullopt;
         }
         const size_t index = std::distance(m_option_list.begin(), std::ranges::find_if(m_option_list, enabled));
-        if (select_analyzed_option(index)) {
+        if (select_option_with_confirmation(index)) {
             return SelectedOption { index, false };
         }
         return std::nullopt;
@@ -608,21 +724,24 @@ std::optional<asst::RoguelikeStageEncounterTaskPlugin::SelectedOption>
         }
         used_fallback = true;
     }
-    if (choice == 0 || !select_analyzed_option(choice - 1)) {
+    if (choice == 0 || !select_option_with_confirmation(choice - 1)) {
         return std::nullopt;
     }
     return SelectedOption { choice - 1, used_fallback };
 }
 
-bool asst::RoguelikeStageEncounterTaskPlugin::select_analyzed_option(size_t index)
+bool asst::RoguelikeStageEncounterTaskPlugin::select_option_with_confirmation(
+    size_t index,
+    const TaskPtr& fixed_option,
+    cv::Mat first_image)
 {
     LogTraceFunction;
 
-    if (index >= m_option_list.size()) [[unlikely]] {
+    if (!fixed_option && index >= m_option_list.size()) [[unlikely]] {
         LogError << __FUNCTION__ << "Attempt to select option" << index + 1 << "out of" << m_option_list.size();
         return false;
     }
-    if (!m_option_list[index].enabled) {
+    if (!fixed_option && !m_option_list[index].enabled) {
         LogInfo << __FUNCTION__ << "Attempt to select disabled option" << index + 1;
         return false;
     }
@@ -630,20 +749,41 @@ bool asst::RoguelikeStageEncounterTaskPlugin::select_analyzed_option(size_t inde
     using Clock = std::chrono::steady_clock;
     constexpr auto ClickRetryDelay = std::chrono::seconds(3);
     constexpr unsigned ObservationDelay = 500;
+    constexpr int MaxClicks = 2;
 
+    auto* task = dynamic_cast<ProcessTask*>(m_task_ptr);
+    if (!task) {
+        LogError << __FUNCTION__ << "Encounter selection requires a ProcessTask";
+        return false;
+    }
     const auto confirm_task = Task.get(m_config->get_theme() + "@Roguelike@StageEncounterLeaveConfirm");
+    const std::string& option_name = fixed_option ? fixed_option->name : m_option_list[index].text;
+    cv::Mat fixed_option_image;
+    bool had_hp = false;
     auto next_click = Clock::time_point {};
-    bool option_clicked = false;
+    int option_clicks = 0;
     int confirmation_clicks = 0;
+    const auto stop_selection = [&](const cv::Mat& image, std::string_view reason) {
+        task->request_failure();
+        LogError << "Encounter selection stopped:" << reason << option_name << "option clicks" << option_clicks
+                 << "confirmation clicks" << confirmation_clicks;
+        if (!image.empty()) {
+            save_img(image, reason);
+        }
+        return false;
+    };
     while (!need_exit()) {
         const auto observed_at = Clock::now();
-        const cv::Mat image = get_event_image();
-        if (image.empty() || need_exit()) {
+        const cv::Mat image = first_image.empty() ? get_event_image() : std::exchange(first_image, cv::Mat {});
+        if (need_exit()) {
             return false;
         }
 
+        if (image.empty()) {
+            return option_clicks > 0 ? stop_selection(image, "encounter capture failed") : false;
+        }
         Matcher::ResultOpt confirmation;
-        if (option_clicked) {
+        if (option_clicks > 0) {
             // 点选后每张新图先检查确认，滑动定位期间也能接上晚到的确认。
             Matcher confirm(image);
             confirm.set_task_info(confirm_task->name);
@@ -656,49 +796,79 @@ bool asst::RoguelikeStageEncounterTaskPlugin::select_analyzed_option(size_t inde
             }
         }
 
+        if (fixed_option && !confirmation && (option_clicks == 0 || had_hp)) {
+            Matcher hp_flag(image);
+            hp_flag.set_task_info("Roguelike@HpFlag");
+            had_hp = hp_flag.analyze().has_value();
+            if (option_clicks > 0 && !had_hp) {
+                return true;
+            }
+        }
         if (confirmation) {
             if (confirmation_clicks == 0 || observed_at >= next_click) {
                 // 最后一次点击也先观察完整一轮，确认提前消失时仍按成功处理。
-                if (confirmation_clicks >= confirm_task->max_times) {
-                    LogError << __FUNCTION__ << "Confirmation is still visible after" << confirmation_clicks
-                             << "click(s)" << m_option_list[index].text;
-                    save_img(image, "confirmation still visible");
-                    return false;
+                if (confirmation_clicks >= std::min(MaxClicks, confirm_task->max_times)) {
+                    return stop_selection(image, "confirmation still visible");
                 }
-                LogInfo << __FUNCTION__ << "Confirming option" << index + 1 << m_option_list[index].text;
+                LogInfo << __FUNCTION__ << "Confirming option" << option_name;
                 if (!ctrler()->click(confirmation->rect)) {
-                    return false;
+                    return stop_selection(image, "confirmation click failed");
                 }
                 ++confirmation_clicks;
                 next_click = Clock::now() + ClickRetryDelay;
             }
         }
-        else if (!option_clicked || observed_at >= next_click) {
-            if (!update_view(image)) {
-                return false;
+        else if (option_clicks == 0 || observed_at >= next_click) {
+            if (option_clicks >= MaxClicks) {
+                return stop_selection(image, "option still unconfirmed");
             }
+            if (fixed_option) {
+                const Rect& roi = fixed_option->specific_rect;
+                if (fixed_option_image.empty()) {
+                    fixed_option_image = make_roi(image, roi).clone();
+                }
+                else {
+                    Matcher same_option(image);
+                    same_option.set_task_info("Roguelike@StageEncounterOption");
+                    same_option.set_roi(roi);
+                    same_option.set_templ(fixed_option_image);
+                    if (!same_option.analyze()) {
+                        return stop_selection(image, "encounter option changed");
+                    }
+                }
+            }
+            else {
+                if (!update_view(image)) {
+                    return option_clicks > 0 ? stop_selection(image, "encounter analysis failed") : false;
+                }
+                if (m_view_end == 0 || (option_clicks > 0 && m_option_y_in_view[index] == UNDEFINED)) {
+                    return stop_selection(image, "encounter options disappeared");
+                }
 
-            // 每轮只推进一次定位，继续寻找同一目标；滑动和匹配不刷新点击计时。
-            if (index < m_view_begin) {
-                if (!move_backward()) {
+                // 每轮只推进一次定位，继续寻找同一目标；滑动和匹配不刷新点击计时。
+                if (index < m_view_begin) {
+                    if (!move_backward()) {
+                        return false;
+                    }
+                    continue;
+                }
+                if (index >= m_view_end) {
+                    if (!move_forward()) {
+                        return false;
+                    }
+                    continue;
+                }
+                if (m_option_y_in_view[index] == UNDEFINED) {
+                    LogError << __FUNCTION__ << "Target option is missing within the visible range" << index + 1;
                     return false;
                 }
-                continue;
             }
-            if (index >= m_view_end) {
-                if (!move_forward()) {
-                    return false;
-                }
-                continue;
+            const bool clicked =
+                fixed_option ? ctrler()->click(fixed_option->specific_rect) : click_analyzed_option(index);
+            if (!clicked) {
+                return stop_selection(image, "option click failed");
             }
-            if (m_option_y_in_view[index] == UNDEFINED) {
-                LogError << __FUNCTION__ << "Target option is missing within the visible range" << index + 1;
-                continue;
-            }
-            if (!click_analyzed_option(index)) {
-                return false;
-            }
-            option_clicked = true;
+            ++option_clicks;
             next_click = Clock::now() + ClickRetryDelay;
         }
         if (!sleep(ObservationDelay)) {
@@ -733,10 +903,24 @@ bool asst::RoguelikeStageEncounterTaskPlugin::click_analyzed_option(size_t index
     return ctrler()->click(click_point);
 }
 
+cv::Mat asst::RoguelikeStageEncounterTaskPlugin::capture_encounter_image()
+{
+    if (m_config->get_theme() == RoguelikeTheme::Sarkaz) {
+        return ctrler()->get_image();
+    }
+    cv::Mat image = ctrler()->get_image_if_available();
+    if (image.empty() && !need_exit()) {
+        if (auto* task = dynamic_cast<ProcessTask*>(m_task_ptr)) {
+            task->request_failure();
+        }
+    }
+    return image;
+}
+
 cv::Mat asst::RoguelikeStageEncounterTaskPlugin::get_event_image()
 {
     while (!need_exit()) {
-        cv::Mat image = ctrler()->get_image();
+        cv::Mat image = capture_encounter_image();
         if (image.empty()) {
             LogError << __FUNCTION__ << "Failed to capture the encounter page";
             return {};
@@ -792,7 +976,7 @@ bool asst::RoguelikeStageEncounterTaskPlugin::update_view(const cv::Mat& image)
     LogTraceFunction;
 
     reset_view();
-    cv::Mat img = image.empty() ? ctrler()->get_image() : image;
+    cv::Mat img = image.empty() ? capture_encounter_image() : image;
     if (img.empty() || need_exit()) {
         return false;
     }
@@ -904,7 +1088,11 @@ std::optional<std::string>
         return std::nullopt;
     }
 
-    OCRer title(ctrler()->get_image());
+    const cv::Mat image = capture_encounter_image();
+    if (image.empty()) {
+        return std::nullopt;
+    }
+    OCRer title(image);
     title.set_task_info(std::string(BlackFlowTitleOcrTask));
     title.set_required({ event.name });
     if (!title.analyze() || title.get_result().empty() || title.get_result().front().text != event.name) {
@@ -931,7 +1119,11 @@ std::optional<std::string> asst::RoguelikeStageEncounterTaskPlugin::next_event(c
             ctrler()->click(task->specific_rect);
             sleep(500);
         }
-        if (hp(ctrler()->get_image()) >= 0) {
+        const cv::Mat image = capture_encounter_image();
+        if (image.empty()) {
+            return std::nullopt;
+        }
+        if (hp(image) >= 0) {
             Log.debug("HP restored, going to next_event:", event.next_event);
             // 多点一次，确保选项恢复
             ctrler()->click(task->specific_rect);

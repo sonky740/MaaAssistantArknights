@@ -482,6 +482,16 @@ const std::string& asst::Controller::get_uuid() const
 
 cv::Mat asst::Controller::get_image(bool raw)
 {
+    return capture_image(raw, false);
+}
+
+cv::Mat asst::Controller::get_image_if_available(bool raw)
+{
+    return capture_image(raw, true);
+}
+
+cv::Mat asst::Controller::capture_image(bool raw, bool require_fresh)
+{
     if (get_scale_size() == std::pair(0, 0)) {
         Log.error("Unknown image size");
         return {};
@@ -501,6 +511,7 @@ cv::Mat asst::Controller::get_image(bool raw)
     }
     while (!success && !need_exit()) {
         if (screencap(true)) {
+            success = true;
             break;
         }
         Log.error(__FUNCTION__, "screencap failed!");
@@ -513,11 +524,15 @@ cv::Mat asst::Controller::get_image(bool raw)
         callback(AsstMsg::ConnectionInfo, info);
 
         const cv::Size d_size(m_scale_size.first, m_scale_size.second);
-        m_cache_image = cv::Mat(d_size, CV_8UC3);
+        std::unique_lock image_lock(m_image_mutex);
+        m_cache_image = cv::Mat::zeros(d_size, CV_8UC3);
 
         break;
     }
 
+    if (require_fresh && !success) {
+        return {};
+    }
     if (raw) {
         std::shared_lock<std::shared_mutex> image_lock(m_image_mutex);
         cv::Mat copy = m_cache_image.clone();
@@ -541,7 +556,7 @@ bool asst::Controller::screencap(bool allow_reconnect)
 {
     CHECK_EXIST(m_controller, false);
     std::unique_lock<std::shared_mutex> image_lock(m_image_mutex);
-    if (!m_controller->screencap(m_cache_image, allow_reconnect)) {
+    if (!m_controller->screencap(m_cache_image, allow_reconnect) || m_cache_image.empty()) {
         return false;
     }
     // 任务帧更新后，外部预览也应读取最新的画面。

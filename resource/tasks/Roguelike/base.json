@@ -97,12 +97,16 @@
         "template": "Roguelike@FormationConfirm.png",
         "action": "ClickSelf",
         "roi": [1015, 601, 265, 119],
+        "maxTimes": 2,
+        "exceededNext": ["RoguelikeQuickFormationClearAndReselect-Formation"],
         "next": ["RoguelikeQuickFormationClearAndReselect-Formation", "RoguelikeQuickFormationClearAndReselect-Confirm"]
     },
     "RoguelikeQuickFormationClearAndReselect-Formation": {
         "template": "Roguelike@QuickFormation.png",
         "action": "ClickSelf",
         "roi": [817, 0, 402, 146],
+        "maxTimes": 2,
+        "exceededNext": ["RoguelikeQuickFormationClearAndReselect-Stop"],
         "next": ["RoguelikeQuickFormationClearAndReselect-Stop", "RoguelikeQuickFormationClearAndReselect-Formation"],
         "postDelay": 500
     },
@@ -661,8 +665,16 @@
     },
     "Roguelike@FormationConfirm": {
         "action": "ClickSelf",
+        "reduceOtherTimes": ["Roguelike@QuickFormation*2"],
         "roi": [1015, 601, 265, 119],
         "next": ["Roguelike@ReturnToMap"]
+    },
+    "Roguelike@FormationReady": {
+        "baseTask": "Roguelike@FormationConfirm",
+        "template": "Roguelike@FormationConfirm.png",
+        "action": "DoNothing",
+        "reduceOtherTimes": [],
+        "next": ["Roguelike@FormationConfirm"]
     },
     "Roguelike@FromIntegratedStrategies": {
         "algorithm": "JustReturn",
@@ -1056,11 +1068,12 @@
         "next": ["Roguelike@SelectTheme", "Roguelike@PreSelectThemeSwipeToLeft"]
     },
     "Roguelike@QuickFormation": {
-        "Doc": "本任务注册了插件 RoguelikeFormationTaskPlugin",
         "action": "ClickSelf",
         "roi": [817, 0, 402, 146],
         "next_Doc": "点击未生效、面板没打开时，重新识别并点击快捷编队",
-        "next": ["Roguelike@FormationConfirm", "Roguelike@QuickFormation"],
+        "next": ["Roguelike@FormationReady", "Roguelike@QuickFormation"],
+        "maxTimes": 2,
+        "exceededNext": ["Roguelike@FormationReady"],
         "preDelay": 100,
         "postDelay": 2000
     },

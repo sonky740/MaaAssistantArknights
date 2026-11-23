@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <unordered_map>
 
 #include "AbstractTask.h"
@@ -25,6 +26,7 @@ public:
     };
 
 public:
+    using ActionGuard = std::function<bool(const TaskInfo&, const Rect&, const cv::Mat*)>;
     using AbstractTask::AbstractTask;
     ProcessTask(const AbstractTask& abs, std::vector<std::string> tasks_name);
     ProcessTask(AbstractTask&& abs, std::vector<std::string> tasks_name) noexcept;
@@ -32,6 +34,12 @@ public:
     virtual ~ProcessTask() override = default;
 
     virtual bool run() override;
+
+    void request_failure() noexcept { m_failure_requested = true; }
+
+    bool failure_requested() const noexcept { return m_failure_requested; }
+
+    void set_action_guard(ActionGuard guard) { m_action_guard = std::move(guard); }
 
     ProcessTask& set_task_delay(int delay) noexcept;
     ProcessTask& set_tasks(std::vector<std::string> tasks_name) noexcept;
@@ -70,8 +78,8 @@ protected:
 
     HitDetail find_first(const TaskList& list);
     NodeStatus run_action(const HitDetail& hits) const;
-    NodeStatus run_task(const HitDetail& hits);
-    std::pair<NodeStatus, TaskConstPtr> find_and_run_task(const TaskList& list);
+    NodeStatus run_task(const HitDetail& hits, ActionGuard& guard);
+    std::pair<NodeStatus, TaskConstPtr> find_and_run_task(const TaskList& list, ActionGuard& guard);
     // for fast init only, not for runtime use
     ProcessTask& set_override_next(std::unordered_map<std::string, TaskList> next_override);
 
@@ -89,7 +97,9 @@ protected:
         double slope_out,
         bool high_resolution_swipe_fix) const;
 
+    ActionGuard m_action_guard;
     TaskList m_begin_task_list;
+    bool m_failure_requested = false;
     std::string m_pre_task_name;
     std::string m_last_task_name;
     std::string m_last_matched_task_name;

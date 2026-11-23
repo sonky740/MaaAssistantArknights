@@ -149,6 +149,8 @@ bool asst::ProcessTask::remove_override_next(std::string_view name)
 bool ProcessTask::run()
 {
     LogTraceFunction;
+    m_failure_requested = false;
+    auto action_guard = m_action_guard; // Each run starts with a fresh input budget.
 
     if (!m_enable) {
         Log.info("task disabled, pass", basic_info().to_string());
@@ -183,7 +185,8 @@ bool ProcessTask::run()
             return false;
         }
 
-        auto [status /*识别成功与否*/, next_task_ptr /*匹配到的任务*/] = find_and_run_task(to_be_recognized);
+        auto [status /*识别成功与否*/, next_task_ptr /*匹配到的任务*/] =
+            find_and_run_task(to_be_recognized, action_guard);
         switch (status) {
         case NodeStatus::RetryFailed:
             // retry 次数达到上限，下一个匹配列表是 on_error_next，若没有则回调 SubTaskError
@@ -264,11 +267,16 @@ ProcessTask::HitDetail ProcessTask::find_first(const TaskList& list) /* const, e
         }
     }
 
-    cv::Mat image = m_reusable.empty() ? ctrler()->get_image() : m_reusable;
-    m_reusable = cv::Mat();
+    cv::Mat image = std::move(m_reusable);
+    if (image.empty()) {
+        image = m_action_guard ? ctrler()->get_image_if_available() : ctrler()->get_image();
+    }
 
     if (underlying != nullptr) {
         underlying->set_main_screen_recognition(false);
+    }
+    if (image.empty()) {
+        return {};
     }
     PipelineAnalyzer analyzer(image, Rect(), m_inst);
     analyzer.set_tasks(list);
@@ -351,7 +359,7 @@ ProcessTask::NodeStatus ProcessTask::run_action(const HitDetail& hits) const
     }
 };
 
-ProcessTask::NodeStatus ProcessTask::run_task(const HitDetail& hits)
+ProcessTask::NodeStatus ProcessTask::run_task(const HitDetail& hits, ActionGuard& guard)
 {
     const auto& task = hits.task_ptr;
     const auto& task_name = task->name;
@@ -371,6 +379,10 @@ ProcessTask::NodeStatus ProcessTask::run_task(const HitDetail& hits)
         return NodeStatus::Runout;
     }
 
+    if (guard && !guard(*task, hits.rect, hits.image.get())) {
+        Log.error("Action guard stopped task", task_name);
+        return NodeStatus::InternalError;
+    }
     ++exec_times;
 
     info["details"] = json::object {
@@ -383,6 +395,9 @@ ProcessTask::NodeStatus ProcessTask::run_task(const HitDetail& hits)
     };
 
     callback(AsstMsg::SubTaskStart, info);
+    if (m_failure_requested) {
+        return NodeStatus::InternalError;
+    }
     // 允许插件停用ProcessTask
     if (!m_enable) {
         Log.info("task disabled after SubTaskStart callback, pass", basic_info().to_string());
@@ -430,6 +445,9 @@ ProcessTask::NodeStatus ProcessTask::run_task(const HitDetail& hits)
     }
 
     callback(AsstMsg::SubTaskCompleted, info);
+    if (m_failure_requested) {
+        return NodeStatus::InternalError;
+    }
     // 允许插件停用ProcessTask
     if (!m_enable) {
         Log.info("task disabled after SubTaskCompleted callback, pass", basic_info().to_string());
@@ -452,7 +470,8 @@ ProcessTask::NodeStatus ProcessTask::run_task(const HitDetail& hits)
 }
 
 // 保证 first 为 Success 或 Runout 时 second 不为 nullptr
-std::pair<ProcessTask::NodeStatus, TaskConstPtr> ProcessTask::find_and_run_task(const TaskList& list)
+std::pair<ProcessTask::NodeStatus, TaskConstPtr>
+    ProcessTask::find_and_run_task(const TaskList& list, ActionGuard& guard)
 {
     if (need_exit()) {
         return { NodeStatus::Interrupted, nullptr };
@@ -480,6 +499,9 @@ std::pair<ProcessTask::NodeStatus, TaskConstPtr> ProcessTask::find_and_run_task(
         if (hits = find_first(list); hits.task_ptr != nullptr) {
             break;
         }
+        if (guard && !hits.image) {
+            return { need_exit() ? NodeStatus::Interrupted : NodeStatus::InternalError, nullptr };
+        }
     }
 
     if (hits.task_ptr == nullptr) {
@@ -495,7 +517,7 @@ std::pair<ProcessTask::NodeStatus, TaskConstPtr> ProcessTask::find_and_run_task(
         return { NodeStatus::Interrupted, nullptr };
     }
 
-    return { run_task(*m_last_hit_detail), m_last_hit_detail->task_ptr };
+    return { run_task(*m_last_hit_detail, guard), m_last_hit_detail->task_ptr };
 }
 
 ProcessTask::TimesLimitData ProcessTask::calc_time_limit(TaskConstPtr task) const

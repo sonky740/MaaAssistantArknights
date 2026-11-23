@@ -23,7 +23,7 @@ bool asst::RoguelikeFormationTaskPlugin::verify(AsstMsg msg, const json::value& 
     if (task_view.starts_with(roguelike_name)) {
         task_view.remove_prefix(roguelike_name.length());
     }
-    if (task_view == "Roguelike@QuickFormation") {
+    if (task_view == "Roguelike@FormationReady") {
         return true;
     }
     else {
@@ -34,6 +34,7 @@ bool asst::RoguelikeFormationTaskPlugin::verify(AsstMsg msg, const json::value& 
 bool asst::RoguelikeFormationTaskPlugin::_run()
 {
     LogTraceFunction;
+    m_reselect_started = false;
 
     RoguelikeFormationImageAnalyzer formation_analyzer(ctrler()->get_image());
     if (!formation_analyzer.analyze()) {
@@ -78,18 +79,28 @@ bool asst::RoguelikeFormationTaskPlugin::_run()
     }
 
     if (reselect) {
-        clear_and_reselect();
+        m_reselect_started = true;
+        return clear_and_reselect();
     }
 
     return true;
 }
 
-void asst::RoguelikeFormationTaskPlugin::clear_and_reselect()
+bool asst::RoguelikeFormationTaskPlugin::clear_and_reselect()
 {
     LogTraceFunction;
 
     // 清空并退出游戏会自动按等级重新排序
-    ProcessTask(*this, { "RoguelikeQuickFormationClearAndReselect" }).run();
+    if (!ProcessTask(*this, { "RoguelikeQuickFormationClearAndReselect" }).run()) {
+        LogWarn << "Quick formation reselection did not complete";
+        if (auto* parent = dynamic_cast<ProcessTask*>(m_task_ptr); parent && !need_exit()) {
+            parent->request_failure();
+        }
+        return false;
+    }
+    if (need_exit()) {
+        return false;
+    }
 
     scan_oper();
     // 如果新识别出的干员页数没有之前的多，说明没在最左侧开始识别
@@ -141,6 +152,7 @@ void asst::RoguelikeFormationTaskPlugin::clear_and_reselect()
     for (const auto& oper : sorted_oper_list) {
         select(oper);
     }
+    return true;
 }
 
 bool asst::RoguelikeFormationTaskPlugin::analyze()

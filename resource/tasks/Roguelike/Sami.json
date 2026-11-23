@@ -274,6 +274,12 @@
         "template": "Roguelike@DropsFlag.png",
         "baseTask": "Sami@Roguelike@DropsFlag_default"
     },
+    "Sami@Roguelike@DropsFlagOnLeaveButton": {
+        "baseTask": "Sami@Roguelike@GetDropLeave",
+        "template": "Sami@Roguelike@GetDropLeave.png",
+        "action": "DoNothing",
+        "next": ["Sami@Roguelike@DropsFlag#next"]
+    },
     "Sami@Roguelike@EnterAfterRecruit": {
         "next": ["#self", "Sami@Roguelike@NextLevel", "Sami@Roguelike@FoldartalGainNextLevel"]
     },
@@ -1067,6 +1073,7 @@
             "Sami@Roguelike@StageEncounterSpecialClose",
             "Sami@Roguelike@TraderRandomShopping",
             "Sami@Roguelike@StageTraderLeave",
+            "Sami@Roguelike@DropsFlagOnLeaveButton",
             "Sami@Roguelike@StageEncounterOptions#next",
             "Sami@Roguelike@DropsFlag",
             "Sami@Roguelike@StartUpThemes#next",
