@@ -1,4 +1,8 @@
 {
+    "RoguelikeAuthenticationFailed": {
+        "roi": [384, 307, 512, 50],
+        "templThreshold": 0.9
+    },
     "RoguelikeChooseSupportBtnOcr": {
         "text": ["지원", "유닛"]
     },

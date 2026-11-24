@@ -64,7 +64,11 @@ private:
     bool update_option_list();
     std::optional<std::string> select_blackflow_option(const Config::RoguelikeEvent& event, size_t choose_option);
     std::optional<SelectedOption> select_event_option(const SelectionPlan& plan, std::string_view event_name);
-    bool select_option_with_confirmation(size_t index, const TaskPtr& fixed_option = nullptr, cv::Mat first_image = {});
+    bool select_option_with_confirmation(
+        size_t index,
+        const TaskPtr& fixed_option = nullptr,
+        cv::Mat first_image = {},
+        const Config::RoguelikeEvent* fixed_event = nullptr);
     bool click_analyzed_option(size_t index);
     cv::Mat capture_encounter_image();
     cv::Mat get_event_image();

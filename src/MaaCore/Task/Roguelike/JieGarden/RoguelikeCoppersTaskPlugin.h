@@ -43,6 +43,9 @@ protected:
     virtual bool _run() override;
 
 private:
+    bool run_copper_task(const std::string& name, std::optional<int> retries = std::nullopt) const;
+    bool allow_direct_input() const;
+
     // 处理拾取模式：分析掉落通宝并选择最优的拾取
     CopperTaskResult handle_pickup_mode();
 

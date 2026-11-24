@@ -150,6 +150,7 @@ bool ProcessTask::run()
 {
     LogTraceFunction;
     m_failure_requested = false;
+    m_terminal_detected = false;
     auto action_guard = m_action_guard; // Each run starts with a fresh input budget.
 
     if (!m_enable) {
@@ -213,8 +214,18 @@ bool ProcessTask::run()
         case NodeStatus::Interrupted:
             // need_exit() or Stop action
             return true;
+        case NodeStatus::TerminalScreen:
+            if (m_terminal_parent) {
+                m_terminal_parent->m_terminal_detected = true;
+                m_terminal_parent->request_failure();
+                return false;
+            }
+            m_terminal_detected = true;
+            [[fallthrough]];
         case NodeStatus::InternalError:
-            callback(AsstMsg::SubTaskError, basic_info());
+            callback(
+                AsstMsg::SubTaskError,
+                m_terminal_detected ? basic_info_with_what(m_terminal_screen) : basic_info());
             return false;
         default:
             Log.error(__FUNCTION__, "| Unknown status", static_cast<int>(status));
@@ -233,6 +244,36 @@ bool ProcessTask::run()
     }
 
     return true;
+}
+
+bool ProcessTask::run_with_terminal_parent(ProcessTask* parent)
+{
+    if (parent) {
+        if (parent->failure_requested()) {
+            return false;
+        }
+        m_terminal_screen = parent->m_terminal_screen;
+        m_terminal_parent = parent;
+    }
+    return run();
+}
+
+bool ProcessTask::allow_direct_input()
+{
+    if (m_failure_requested || m_terminal_screen.empty()) {
+        return !m_failure_requested;
+    }
+    const auto image = ctrler()->get_image_if_available();
+    if (!image.empty()) {
+        PipelineAnalyzer analyzer(image, Rect(), m_inst);
+        analyzer.set_tasks({ m_terminal_screen });
+        m_terminal_detected = analyzer.analyze().has_value();
+        if (!m_terminal_detected) {
+            return true;
+        }
+    }
+    request_failure();
+    return false;
 }
 
 bool ProcessTask::_run()
@@ -254,7 +295,9 @@ ProcessTask::HitDetail ProcessTask::find_first(const TaskList& list) /* const, e
 
     // 如果第一个任务是JustReturn的，那就没必要再截图并计算了
     TaskConstPtr task_ptr = Task.get(list.front());
-    if (task_ptr != nullptr && task_ptr->algorithm == AlgorithmType::JustReturn) {
+    if (task_ptr != nullptr && task_ptr->algorithm == AlgorithmType::JustReturn &&
+        (m_terminal_screen.empty() || task_ptr->action == ProcessTaskAction::DoNothing ||
+         task_ptr->action == ProcessTaskAction::Stop)) {
         return { .task_ptr = std::move(task_ptr) };
     }
 
@@ -269,7 +312,8 @@ ProcessTask::HitDetail ProcessTask::find_first(const TaskList& list) /* const, e
 
     cv::Mat image = std::move(m_reusable);
     if (image.empty()) {
-        image = m_action_guard ? ctrler()->get_image_if_available() : ctrler()->get_image();
+        image = (m_action_guard || !m_terminal_screen.empty()) ? ctrler()->get_image_if_available()
+                                                              : ctrler()->get_image();
     }
 
     if (underlying != nullptr) {
@@ -279,7 +323,11 @@ ProcessTask::HitDetail ProcessTask::find_first(const TaskList& list) /* const, e
         return {};
     }
     PipelineAnalyzer analyzer(image, Rect(), m_inst);
-    analyzer.set_tasks(list);
+    auto candidates = list;
+    if (!m_terminal_screen.empty()) {
+        candidates.insert(candidates.begin(), m_terminal_screen);
+    }
+    analyzer.set_tasks(std::move(candidates));
 
     auto res_opt = analyzer.analyze();
     if (!res_opt) {
@@ -409,6 +457,11 @@ ProcessTask::NodeStatus ProcessTask::run_task(const HitDetail& hits, ActionGuard
         return NodeStatus::Interrupted;
     }
 
+    if (task->pre_delay > 0 && task->action != ProcessTaskAction::DoNothing && task->action != ProcessTaskAction::Stop &&
+        !allow_direct_input()) {
+        return m_terminal_detected ? NodeStatus::TerminalScreen : NodeStatus::InternalError;
+    }
+
     // 根据任务的 action 执行任务
     if (auto result = run_action(hits); result != NodeStatus::Success) {
         return result;
@@ -506,6 +559,9 @@ std::pair<ProcessTask::NodeStatus, TaskConstPtr>
 
     if (hits.task_ptr == nullptr) {
         return { NodeStatus::RetryFailed, nullptr };
+    }
+    else if (!m_terminal_screen.empty() && hits.task_ptr->name == m_terminal_screen) {
+        return { NodeStatus::TerminalScreen, hits.task_ptr };
     }
     else {
         m_pre_task_name = std::move(m_last_task_name);

@@ -1,4 +1,15 @@
 {
+    "Sami@Roguelike@StageEncounterFixedLayoutHeader": {
+        "algorithm": "MatchTemplate",
+        "roi": [1237, 65, 41, 560],
+        "templThreshold": 0.92,
+        "rectMove": [0, 60, 0, 0]
+    },
+    "Sami@Roguelike@StageEncounterFixedLayoutReward": {
+        "algorithm": "MatchTemplate",
+        "roi": [897, 95, 104, 550],
+        "templThreshold": 0.92
+    },
     "Sami@Roguelike@StageEnterBattleAgain": {
         "specificRect": [1180, 460, 30, 20]
     },

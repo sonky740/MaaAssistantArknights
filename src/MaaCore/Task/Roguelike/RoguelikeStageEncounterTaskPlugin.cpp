@@ -42,23 +42,46 @@ asst::TaskPtr recognize_fixed_layout(
     size_t choice)
 {
     const auto prefix = theme + "@Roguelike@StageEncounterOption";
-    std::vector<int> marker_y;
+    const auto header_name = theme + "@Roguelike@StageEncounterFixedLayoutHeader";
+    const auto header =
+        asst::Task.is_explicit_task(header_name) ? asst::Task.get<asst::MatchTaskInfo>(header_name) : nullptr;
+    std::vector<int> marker_y, header_y;
     bool has_leave = false;
     for (const auto& name : asst::Task.get(prefix + "s")->next) {
         if (!name.starts_with(prefix)) {
             continue;
         }
+        // The KR Sami Unknown template marks a header, above the clickable reward row.
+        const bool is_header = header && name == prefix + "Unknown";
         asst::MultiMatcher matcher(image);
-        matcher.set_task_info(name);
+        matcher.set_task_info(is_header ? header : asst::Task.get(name));
         if (const auto matches = matcher.analyze()) {
             for (const auto& match : *matches) {
-                marker_y.push_back(match.rect.y + match.rect.height / 2);
+                if (is_header) {
+                    header_y.push_back(match.rect.y + header->rect_move.y);
+                }
+                else {
+                    marker_y.push_back(match.rect.y + match.rect.height / 2);
+                }
             }
             has_leave |= !matches->empty() && name == prefix + "Leave";
         }
     }
-    if (marker_y.empty()) {
+    if ((marker_y.empty() && header_y.empty()) || (header_y.size() == 1 && !has_leave)) {
         return nullptr;
+    }
+
+    if (!header_y.empty()) {
+        if (const auto reward =
+                asst::Task.get<asst::MatchTaskInfo>(theme + "@Roguelike@StageEncounterFixedLayoutReward")) {
+            asst::MultiMatcher matcher(image);
+            matcher.set_task_info(reward);
+            if (const auto matches = matcher.analyze()) {
+                for (const auto& match : *matches) {
+                    marker_y.push_back(match.rect.y + match.rect.height / 2);
+                }
+            }
+        }
     }
 
     auto layouts = event.fallback_choices;
@@ -66,6 +89,9 @@ asst::TaskPtr recognize_fixed_layout(
     auto common_target = cv::Rect(0, 0, image.cols, image.rows);
     asst::TaskPtr complete;
     for (const auto& [count, item] : layouts) {
+        if (!header_y.empty() && header_y.size() != count) {
+            continue;
+        }
         // 鲍勃的三个或四个货品均为藏品；单独出现的离开标记不属于货品页。
         if (count > 1 && event.name == "鲍勃杂货店" && has_leave) {
             continue;
@@ -86,7 +112,8 @@ asst::TaskPtr recognize_fixed_layout(
             const auto in_row = [&](int y) {
                 return rect.y <= y && y < rect.y + rect.height;
             };
-            if (std::erase_if(remaining, in_row) > 0) {
+            const bool has_icon = std::erase_if(remaining, in_row) > 0;
+            if (header_y.empty() ? has_icon : std::count_if(header_y.begin(), header_y.end(), in_row) == 1) {
                 ++seen;
             }
         }
@@ -94,6 +121,13 @@ asst::TaskPtr recognize_fixed_layout(
             continue;
         }
         const auto rect = target->specific_rect;
+        if (header) {
+            const bool target_active =
+                std::ranges::any_of(marker_y, [&](int y) { return rect.y <= y && y < rect.y + rect.height; });
+            if (seen != count || !target_active) {
+                return nullptr;
+            }
+        }
         common_target &= cv::Rect(rect.x, rect.y, rect.width, rect.height);
         if (seen == count) {
             complete = target;
@@ -107,7 +141,6 @@ asst::TaskPtr recognize_fixed_layout(
     result->specific_rect = { common_target.x, common_target.y, common_target.width, common_target.height };
     return result;
 }
-
 }
 
 bool asst::RoguelikeStageEncounterTaskPlugin::verify(AsstMsg msg, const json::value& details) const
@@ -323,7 +356,10 @@ std::optional<std::string> asst::RoguelikeStageEncounterTaskPlugin::handle_singl
                 return std::nullopt;
             }
         }
-        if (option && select_option_with_confirmation(choose_option - 1, option, image)) {
+        const bool verify_retry = !event.fallback_choices.empty() &&
+                                  Task.is_explicit_task(theme + "@Roguelike@StageEncounterFixedLayoutHeader");
+        if (option &&
+            select_option_with_confirmation(choose_option - 1, option, image, verify_retry ? &event : nullptr)) {
             return next_event(event);
         }
         return std::nullopt;
@@ -733,7 +769,8 @@ std::optional<asst::RoguelikeStageEncounterTaskPlugin::SelectedOption>
 bool asst::RoguelikeStageEncounterTaskPlugin::select_option_with_confirmation(
     size_t index,
     const TaskPtr& fixed_option,
-    cv::Mat first_image)
+    cv::Mat first_image,
+    const Config::RoguelikeEvent* fixed_event)
 {
     LogTraceFunction;
 
@@ -828,6 +865,13 @@ bool asst::RoguelikeStageEncounterTaskPlugin::select_option_with_confirmation(
                     fixed_option_image = make_roi(image, roi).clone();
                 }
                 else {
+                    if (fixed_event) {
+                        const auto current =
+                            recognize_fixed_layout(m_config->get_theme(), image, *fixed_event, index + 1);
+                        if (!current || current->name != fixed_option->name || current->specific_rect != roi) {
+                            return stop_selection(image, "encounter layout changed");
+                        }
+                    }
                     Matcher same_option(image);
                     same_option.set_task_info("Roguelike@StageEncounterOption");
                     same_option.set_roi(roi);

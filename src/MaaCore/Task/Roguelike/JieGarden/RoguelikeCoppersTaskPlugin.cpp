@@ -89,7 +89,25 @@ bool asst::RoguelikeCoppersTaskPlugin::_run()
     reset_in_run_variables();
 
     // 将结果转换为bool：SUCCESS和SKIPPED都返回true，FAILED返回false
+    if (auto* parent = dynamic_cast<ProcessTask*>(m_task_ptr); parent && parent->failure_requested()) {
+        return true; // The parent reports the interruption without retrying this plugin.
+    }
     return (result == CopperTaskResult::SUCCESS || result == CopperTaskResult::SKIPPED);
+}
+
+bool asst::RoguelikeCoppersTaskPlugin::run_copper_task(const std::string& name, std::optional<int> retries) const
+{
+    ProcessTask child(*this, { name });
+    if (retries) {
+        child.set_retry_times(*retries);
+    }
+    return child.run_with_terminal_parent(dynamic_cast<ProcessTask*>(m_task_ptr));
+}
+
+bool asst::RoguelikeCoppersTaskPlugin::allow_direct_input() const
+{
+    auto* parent = dynamic_cast<ProcessTask*>(m_task_ptr);
+    return !parent || parent->allow_direct_input();
 }
 
 // 处理掉落通宝的拾取：识别交换按钮，ROI偏移来识别通宝名称
@@ -148,6 +166,9 @@ asst::CopperTaskResult asst::RoguelikeCoppersTaskPlugin::handle_pickup_mode()
         if (click_point_fallback.x != 0 && click_point_fallback.y != 0) {
             LogWarn << __FUNCTION__ << "| clicking fallback point at (" << click_point_fallback.x << ","
                     << click_point_fallback.y << ")";
+            if (!allow_direct_input()) {
+                return CopperTaskResult::FAILED;
+            }
             ctrler()->click(click_point_fallback);
             return CopperTaskResult::SKIPPED;
         }
@@ -165,6 +186,9 @@ asst::CopperTaskResult asst::RoguelikeCoppersTaskPlugin::handle_pickup_mode()
             << " with priority:" << max_pickup_it->first.pickup_priority;
 
     // 点击选择的最优通宝
+    if (!allow_direct_input()) {
+        return CopperTaskResult::FAILED;
+    }
     ctrler()->click(max_pickup_it->second);
 
 #ifdef ASST_DEBUG
@@ -180,7 +204,11 @@ asst::CopperTaskResult asst::RoguelikeCoppersTaskPlugin::handle_pickup_mode()
 asst::CopperTaskResult asst::RoguelikeCoppersTaskPlugin::handle_exchange_mode()
 {
     // 确保列表滑动到最左边（有时候进入界面不在最左边）
+    auto* parent = dynamic_cast<ProcessTask*>(m_task_ptr);
     bool ret = swipe_copper_list_to_leftmost(2);
+    if (parent && parent->failure_requested()) {
+        return CopperTaskResult::FAILED;
+    }
 
     // =================================================
     // 第一步：识别左侧新拾取的通宝（col == 0）
@@ -264,17 +292,25 @@ asst::CopperTaskResult asst::RoguelikeCoppersTaskPlugin::handle_exchange_mode()
         bool is_last_col =
             col == 1
                 ? false
-                : !ProcessTask(*this, { "JieGarden@Roguelike@CoppersAnalyzer-TypeSelected" }).set_retry_times(2).run();
+                : !run_copper_task("JieGarden@Roguelike@CoppersAnalyzer-TypeSelected", 2);
+
+        if (parent && parent->failure_requested()) {
+            return CopperTaskResult::FAILED;
+        }
 
         // 如果不是最后一列，点击右侧上方的通宝作为滑动成功的标志
         if (!is_last_col) {
-            ret &= ProcessTask(*this, { "JieGarden@Roguelike@CoppersListSwipeFlagClick" }).run();
+            ret &= run_copper_task("JieGarden@Roguelike@CoppersListSwipeFlagClick");
         }
         else {
             // 最后一列时先滑动到最右侧再识别
             swipe_copper_list_to_rightmost(2);
             // 点击中间的通宝避免干扰右侧识别
-            ret &= ProcessTask(*this, { "JieGarden@Roguelike@CoppersListSwipeRightMostClick" }).run();
+            ret &= run_copper_task("JieGarden@Roguelike@CoppersListSwipeRightMostClick");
+        }
+
+        if (parent && parent->failure_requested()) {
+            return CopperTaskResult::FAILED;
         }
 
         // 获取新图像并检查是否滑动成功
@@ -339,6 +375,10 @@ asst::CopperTaskResult asst::RoguelikeCoppersTaskPlugin::handle_exchange_mode()
             m_copper_list.emplace_back(std::move(copper));
         }
 
+        if (parent && parent->failure_requested()) {
+            return CopperTaskResult::FAILED;
+        }
+
         // 如果不是最后一列，向右滑动一列继续扫描
         if (!is_last_col) {
             swipe_copper_list_right(1);
@@ -393,7 +433,7 @@ asst::CopperTaskResult asst::RoguelikeCoppersTaskPlugin::handle_exchange_mode()
     click_copper_at_position(worst_it->col, worst_it->row);
 
     // 执行确认交换任务
-    ret &= ProcessTask(*this, { "JieGarden@Roguelike@CoppersTakeConfirm" }).run();
+    ret &= run_copper_task("JieGarden@Roguelike@CoppersTakeConfirm");
 
     return ret ? CopperTaskResult::SUCCESS : CopperTaskResult::FAILED;
 }
@@ -407,7 +447,7 @@ bool asst::RoguelikeCoppersTaskPlugin::swipe_copper_list(int times, bool to_left
         std::string task_name = to_left ? "JieGarden@Roguelike@CoppersListSlowlySwipeToTheLeft"
                                         : "JieGarden@Roguelike@CoppersListSlowlySwipeToTheRight";
 
-        ret &= ProcessTask(*this, { task_name }).run();
+        ret &= run_copper_task(task_name);
 
         // 识别滑动效果，误差较大时额外滑动一次进行校准
         Matcher matcher(ctrler()->get_image());
@@ -420,6 +460,9 @@ bool asst::RoguelikeCoppersTaskPlugin::swipe_copper_list(int times, bool to_left
                 Point origin_point = Point(m_origin_x, m_y);
                 Point cur_point = Point(cur_x, m_y);
                 auto swipe_task = Task.get("SlowlySwipeToTheRight");
+                if (!allow_direct_input()) {
+                    return false;
+                }
                 ret &= ctrler()->swipe(
                     cur_point,
                     origin_point,
@@ -460,7 +503,7 @@ bool asst::RoguelikeCoppersTaskPlugin::swipe_copper_list_to_leftmost(int times) 
     bool ret = true;
     for (int i = 0; i < times; ++i) {
         std::string task_name = "JieGarden@Roguelike@CoppersListSwipeToTheLeft";
-        ret &= ProcessTask(*this, { task_name }).run();
+        ret &= run_copper_task(task_name);
     }
     return ret;
 }
@@ -470,7 +513,7 @@ bool asst::RoguelikeCoppersTaskPlugin::swipe_copper_list_to_rightmost(int times)
     bool ret = true;
     for (int i = 0; i < times; ++i) {
         std::string task_name = "JieGarden@Roguelike@CoppersListSwipeToTheRight";
-        ret &= ProcessTask(*this, { task_name }).run();
+        ret &= run_copper_task(task_name);
     }
     return ret;
 }
@@ -503,6 +546,9 @@ void asst::RoguelikeCoppersTaskPlugin::click_copper_at_position(int col, int row
     sleep(300);
 
     // 执行点击
+    if (!allow_direct_input()) {
+        return;
+    }
     ctrler()->click(click_point);
     sleep(300);
 }

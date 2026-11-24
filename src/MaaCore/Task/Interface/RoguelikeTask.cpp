@@ -149,6 +149,10 @@ asst::RoguelikeTask::RoguelikeTask(const AsstCallback& callback, Assistant* inst
 {
     LogTraceFunction;
     m_roguelike_task_ptr->set_action_guard(EncounterClickGuard {});
+    const std::string auth_failure = "RoguelikeAuthenticationFailed";
+    if (Task.is_explicit_task(auth_failure)) {
+        m_roguelike_task_ptr->set_terminal_screen(auth_failure);
+    }
     // BlackFlow's chain-wide maxTimes would return success while the same confirmation is still visible.
     m_roguelike_task_ptr->set_times_limit("BlackFlow@Roguelike@StageEncounterLeaveConfirm", INT_MAX);
 

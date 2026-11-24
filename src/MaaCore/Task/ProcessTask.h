@@ -39,6 +39,10 @@ public:
 
     bool failure_requested() const noexcept { return m_failure_requested; }
 
+    void set_terminal_screen(std::string name) { m_terminal_screen = std::move(name); }
+    bool run_with_terminal_parent(ProcessTask* parent);
+    bool allow_direct_input();
+
     void set_action_guard(ActionGuard guard) { m_action_guard = std::move(guard); }
 
     ProcessTask& set_task_delay(int delay) noexcept;
@@ -63,6 +67,7 @@ protected:
         Runout,      // 执行次数达到上限，对应 exceeded_next
         Interrupted,
         InternalError,
+        TerminalScreen,
     };
 
     struct HitDetail
@@ -97,6 +102,9 @@ protected:
         double slope_out,
         bool high_resolution_swipe_fix) const;
 
+    std::string m_terminal_screen;
+    ProcessTask* m_terminal_parent = nullptr;
+    bool m_terminal_detected = false;
     ActionGuard m_action_guard;
     TaskList m_begin_task_list;
     bool m_failure_requested = false;

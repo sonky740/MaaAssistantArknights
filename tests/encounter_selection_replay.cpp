@@ -1,10 +1,12 @@
 #include "Assistant.h"
 #include "AsstCaller.h"
+#include "Config/Roguelike/RoguelikeStageEncounterConfig.h"
 #include "Config/TaskData.h"
 #include "Controller/Controller.h"
 #include "Task/Roguelike/BlackFlow/BlackFlowSession.h"
 #include "Task/Roguelike/RoguelikeStageEncounterTaskPlugin.h"
 
+#include <filesystem>
 #include <iostream>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -242,7 +244,8 @@ public:
 
 int main(int argc, char** argv)
 {
-    if (argc != 6 || !AsstSetUserDir(argv[1]) || !AsstLoadResource(argv[2]) || !AsstLoadResource(argv[3])) {
+    if ((argc != 6 && argc != 10 && argc != 11) || !AsstSetUserDir(argv[1]) || !AsstLoadResource(argv[2]) ||
+        !AsstLoadResource(argv[3])) {
         return 2;
     }
     const std::string theme = argv[4];
@@ -283,6 +286,38 @@ int main(int argc, char** argv)
         return 2;
     }
     task.set_tasks({ trigger }).set_task_delay(0);
+    // External captures exercise the real selection policy and layout against a simulated confirmation.
+    if (argc >= 10) {
+        const bool force_blocked_row = argc == 11 && std::string_view(argv[10]) == "blocked";
+        if (argc == 11 && !force_blocked_row) {
+            return 2;
+        }
+        backend->page = cv::imread(argv[6]);
+        const auto expected = asst::Task.get(theme + "@Roguelike@OptionChoose" + argv[8] + "-" + argv[9]);
+        if (!expected || backend->page.size() != cv::Size(1280, 720)) {
+            return 2;
+        }
+        plugin->event = argv[7];
+        if (force_blocked_row) {
+            auto& event = asst::RoguelikeStageEncounter.m_events.at({ theme, -1 }).at(plugin->event);
+            event.choice_require.clear();
+            event.default_choose = std::stoul(argv[9]);
+        }
+        const auto rect = expected->specific_rect;
+        backend->option_rect = { rect.x, rect.y, rect.width, rect.height };
+        backend->pressed = backend->page.clone();
+        button.copyTo(backend->pressed(backend->confirmation_rect));
+        backend->reset({ 0, 0 });
+        const bool result = task.run();
+        std::cout << "Selection capture " << plugin->event << " rows=" << argv[8] << " choice=" << argv[9]
+                  << " result=" << result << " options=" << backend->options << " confirms=" << backend->confirms
+                  << " unexpected=" << backend->unexpected << std::endl;
+        const int clicks = force_blocked_row ? 0 : 1;
+        const bool passed = result == !force_blocked_row && backend->options == clicks && backend->confirms == clicks &&
+                            backend->followups == clicks && backend->unexpected == 0 &&
+                            process_errors == int(force_blocked_row);
+        return passed ? 0 : 1;
+    }
     int failures = 0;
     std::vector<Scenario> cases { { 0, 0 },
                                   { 1, 0 },
@@ -397,11 +432,15 @@ int main(int argc, char** argv)
         if (leave.empty() || relic.empty()) {
             return 2;
         }
+        const bool header_enabled = !std::filesystem::equivalent(argv[2], argv[3]);
+        if (header_enabled != asst::Task.is_explicit_task("Sami@Roguelike@StageEncounterFixedLayoutHeader")) {
+            return 1;
+        }
         for (const ShopLayout layout : std::vector<ShopLayout> { { 3, 1, 3, 1, 0, false, true },
                                                                  { 4, 4, 4, 1, 0, false, true },
                                                                  { 1, 1, 1, 1, 0, true, true },
                                                                  { 3, 2, 1, 2, 0, false, false },
-                                                                 { 3, 2, 1, 2, 2, false, true } }) {
+                                                                 { 3, 2, 1, 2, 2, false, !header_enabled } }) {
             backend->reset({ 0, 0 });
             plugin->pages = 1;
             backend->set_layout(
@@ -425,6 +464,59 @@ int main(int argc, char** argv)
                       << " vision=" << layout.vision << " leave=" << layout.leave << " result=" << result
                       << " options=" << backend->options << " unexpected=" << backend->unexpected << " pass=" << passed
                       << std::endl;
+            failures += !passed;
+        }
+
+        if (!header_enabled) {
+            return failures ? 1 : 0;
+        }
+        const auto kr_templates =
+            std::string(argv[3]) + "/resource/template/Roguelike/Sami/Sami@Roguelike@StageEncounterFixedLayout";
+        const auto header = cv::imread(kr_templates + "Header.png"), reward = cv::imread(kr_templates + "Reward.png");
+        if (header.empty() || reward.empty()) {
+            return 2;
+        }
+
+        struct HeaderLayout
+        {
+            std::vector<int> headers;
+            bool reward_visible, success;
+            bool hide_header_after_click = false;
+            int missed_clicks = 0;
+        };
+
+        for (const HeaderLayout& layout : std::vector<HeaderLayout> { { { 137, 302, 467 }, true, true },
+                                                                      { { 137, 302, 467 }, false, false },
+                                                                      { { 137, 467 }, true, false },
+                                                                      { { 302 }, true, false },
+                                                                      { { 137, 302, 467, 580 }, true, false },
+                                                                      { { 137, 302, 467 }, true, true, false, 1 },
+                                                                      { { 137, 302, 467 }, true, false, true } }) {
+            backend->reset({ layout.missed_clicks, 0 });
+            backend->set_layout(theme, 3, 1, 0, relic, button);
+            for (const int y : layout.headers) {
+                header.copyTo(backend->page(cv::Rect(1240, y, header.cols, header.rows)));
+            }
+            if (layout.reward_visible) {
+                reward.copyTo(backend->page(cv::Rect(902, 183, reward.cols, reward.rows)));
+            }
+            if (layout.hide_header_after_click) {
+                backend->reset({ 0, 0, Fault::ChangedPage });
+                backend->other_page = backend->page.clone();
+                backend->other_page(cv::Rect(1240, 467, header.cols, header.rows)).setTo(0);
+            }
+            backend->pressed = backend->page.clone();
+            button.copyTo(backend->pressed(backend->confirmation_rect));
+            process_errors = 0;
+            const bool result = task.run();
+            const bool passed =
+                result == layout.success &&
+                backend->options == int(layout.success || layout.hide_header_after_click) + layout.missed_clicks &&
+                backend->confirms == int(layout.success) && backend->followups == int(layout.success) &&
+                backend->unexpected == 0 && process_errors == int(!layout.success);
+            std::cout << "Selection headers=" << layout.headers.size() << " reward=" << layout.reward_visible
+                      << " changedAfterClick=" << layout.hide_header_after_click << " options=" << backend->options
+                      << " pass=" << passed << std::endl;
             failures += !passed;
         }
     }

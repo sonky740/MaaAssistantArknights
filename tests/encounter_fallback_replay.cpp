@@ -5,8 +5,10 @@
 #include "Controller/Controller.h"
 #include "Task/Interface/RoguelikeTask.h"
 #include "Task/ProcessTask.h"
+#include "Task/Roguelike/JieGarden/RoguelikeCoppersTaskPlugin.h"
 
 #include <iostream>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <optional>
 
@@ -24,7 +26,8 @@ public:
         if (fail_capture_after && clicks >= *fail_capture_after) {
             return false;
         }
-        image = frames.at(std::min(clicks, frames.size() - 1));
+        image = frames.at(std::min(advance_on_capture ? captures : clicks, frames.size() - 1));
+        ++captures;
         return true;
     }
 
@@ -66,6 +69,8 @@ public:
     std::pair<int, int> get_screen_res() const noexcept override { return { 1280, 720 }; }
 
     std::vector<cv::Mat> frames;
+    bool advance_on_capture = false;
+    size_t captures = 0;
     size_t clicks = 0;
     size_t budget = 0;
     std::optional<size_t> fail_capture_after;
@@ -89,7 +94,8 @@ cv::Mat make_page(const std::string& node, const std::string& label = {}, int sh
 
 int main(int argc, char** argv)
 {
-    if (argc != 5 || !AsstSetUserDir(argv[1]) || !AsstLoadResource(argv[2]) || !AsstLoadResource(argv[3])) {
+    if ((argc != 5 && argc != 6) || !AsstSetUserDir(argv[1]) || !AsstLoadResource(argv[2]) ||
+        !AsstLoadResource(argv[3])) {
         return 2;
     }
     const std::string theme = argv[4], prefix = theme + "@Roguelike@";
@@ -99,9 +105,11 @@ int main(int argc, char** argv)
     assistant.ctrler()->m_scale_proxy =
         std::make_shared<asst::ControlScaleProxy>(backend, asst::ControllerType::Adb, nullptr);
     int errors = 0;
+    int auth_errors = 0;
     auto callback = [&](asst::AsstMsg msg, const json::value& detail, asst::Assistant*) {
         if (msg == asst::AsstMsg::SubTaskError && detail.get("subtask", std::string()) == "ProcessTask") {
             ++errors;
+            auth_errors += detail.get("what", std::string()) == "RoguelikeAuthenticationFailed";
         }
     };
     asst::RoguelikeTask roguelike(callback, &assistant);
@@ -118,6 +126,7 @@ int main(int argc, char** argv)
                          std::optional<size_t> fail_capture_after = std::nullopt) {
         backend->frames = std::move(frames);
         backend->clicks = 0;
+        backend->captures = 0;
         backend->budget = expected_clicks;
         backend->fail_capture_after = fail_capture_after;
         errors = 0;
@@ -134,6 +143,67 @@ int main(int argc, char** argv)
                   << " errors=" << errors << " expectSuccess=" << success << " pass=" << passed << std::endl;
         return passed;
     };
+    const auto auth_frame = argc == 6 ? cv::imread(argv[5]) : make_page("RoguelikeAuthenticationFailed");
+    if (auth_frame.empty() || auth_frame.size() != cv::Size(1280, 720)) {
+        return 2;
+    }
+    const std::string node = prefix + (theme == "JieGarden" ? "CoppersAbandonExchange" : "StageEncounterLeaveConfirm");
+    if (!process.override_next(node, {})) {
+        return 2;
+    }
+    process.set_retry_times(2);
+    for (int i = 1; i <= 2; ++i) {
+        if (!run(node, { auth_frame }, 0, false) || auth_errors != i || backend->captures != 1) {
+            return 1;
+        }
+    }
+    if (!run(node, { make_page(node) }, 1, true) || auth_errors != 2) {
+        return 1;
+    }
+    if (theme == "JieGarden") {
+        auto coppers = process.register_plugin<asst::RoguelikeCoppersTaskPlugin>(
+            roguelike.m_config_ptr, roguelike.m_control_ptr);
+        const auto take = prefix + "CoppersTakeFlag";
+        backend->advance_on_capture = true;
+        if (!run(take, { make_page(take), auth_frame }, 0, false) || auth_errors != 3) {
+            return 1;
+        }
+        backend->advance_on_capture = false;
+        if (!run(node, { make_page(node) }, 1, true)) {
+            return 1;
+        }
+
+        // A failed type probe must never turn an authentication dialog into a last-column swipe or click.
+        backend->frames = { auth_frame };
+        backend->clicks = backend->budget = backend->captures = 0;
+        if (coppers->run_copper_task(prefix + "CoppersAnalyzer-TypeSelected", 2) || !process.failure_requested() ||
+            backend->captures != 1 || coppers->swipe_copper_list_to_rightmost(2)) {
+            return 1;
+        }
+        coppers->click_copper_at_position(1, 1);
+        if (backend->captures != 1 || !run(node, { make_page(node) }, 1, true) || auth_errors != 3) {
+            return 1;
+        }
+        cv::Mat exchange(720, 1280, CV_8UC3, cv::Scalar::all(24));
+        cv::putText(exchange, ">>>", { 588, 594 }, cv::FONT_HERSHEY_SIMPLEX, 1.0, { 255, 255, 255 }, 2);
+        backend->advance_on_capture = true;
+        backend->frames = { exchange, auth_frame };
+        backend->clicks = backend->budget = backend->captures = 0;
+        if (coppers->run_copper_task(prefix + "CoppersExchangeFinish", 0) || !process.failure_requested() ||
+            backend->captures != 2 || backend->clicks) {
+            return 1;
+        }
+        backend->advance_on_capture = false;
+        if (!run(node, { make_page(node) }, 1, true)) {
+            return 1;
+        }
+        process.clear_plugin();
+    }
+    if (argc == 6) {
+        return 0;
+    }
+    process.remove_override_next(node);
+    process.set_retry_times(0);
     const auto confirm = prefix + "StageEncounterLeaveConfirm";
     int failures = 0;
     const std::vector<std::string> options = theme == "BlackFlow"

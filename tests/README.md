@@ -19,6 +19,25 @@ sh tests/run_native_roguelike_replays.sh "$overview_png" "$panel_png" "$reward_p
 
 The runner links to the actual matcher and task plugins. A test controller supplies frames and records input without connecting to an emulator. Each case stores its log in the temporary directory printed by the runner. For a separately staged build, set `MAA_CORE_SOURCE` to its matching headers, `MAA_DEBUG_LIB_DIR` to its Debug libraries and `MAA_RESOURCE_DIR` to the directory containing the packaged `resource` folder. The controller probes use `-fno-access-control` only in the test translation units.
 
+To replay a 1280×720 fixed-layout encounter capture, use the binary in the runner's temporary directory. Pass the canonical event name, visible row count, and expected one-based choice. Adding `blocked` forces that choice in the test policy and requires a chain failure with zero clicks. Both modes use a simulated confirmation page.
+
+```sh
+mkdir -p "$scratch/capture"
+kr="$PWD/resource/global/YoStarKR"
+button="$kr/resource/template/Roguelike/Sami/Sami@Roguelike@StageEncounterLeaveConfirm.png"
+"$scratch/encounter_selection_replay" "$scratch/capture" "$PWD" "$kr" Sami "$button" "$frame" 鲍勃杂货店 3 2
+"$scratch/encounter_selection_replay" "$scratch/capture" "$PWD" "$kr" Sami "$button" "$frame" 鲍勃杂货店 3 3 blocked
+```
+
+### Korean authentication failure
+
+The native fallback replay checks two consecutive authentication failures and the next successful run for each theme. The JieGarden case also moves the dialog into the copper plugin, including the one-second delay between recognizing the exchange button and clicking it. The expected input count on the dialog is zero. The default run builds the dialog from the Korean text template. To substitute a private 1280×720 capture, use the binary in the temporary directory printed by the runner:
+
+```sh
+mkdir -p "$scratch/auth"
+"$scratch/encounter_fallback_replay" "$scratch/auth" "$PWD" "$PWD/resource/global/YoStarKR" JieGarden "$auth_png"
+```
+
 ## Native operator progression replay on macOS arm64
 
 With the same Debug build, run `sh tests/run_oper_progress_level_replay.sh`. The fixture checks plan validation, strict inspection, level-dial movement and skill rank confirmation using a local controller. To exercise both level number regions on a captured level-selection screen, pass its path and the displayed target, for example `sh tests/run_oper_progress_level_replay.sh "$dial_png" 60`. The test loads the Korean resource overlay.
