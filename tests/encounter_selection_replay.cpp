@@ -319,6 +319,14 @@ int main(int argc, char** argv)
         return passed ? 0 : 1;
     }
     int failures = 0;
+    if (theme == asst::RoguelikeTheme::Sami) {
+        const auto& event = asst::RoguelikeStageEncounter.get_events(theme, config->get_mode()).at("随到随取");
+        const auto at_threshold = SelectionPlugin::process_task(event, 3);
+        const auto above_threshold = SelectionPlugin::process_task(event, 4);
+        std::cout << "Finders keepers: vision 3 selects " << at_threshold << ", vision 4 selects " << above_threshold
+                  << std::endl;
+        failures += at_threshold != 1 || above_threshold != 2;
+    }
     std::vector<Scenario> cases { { 0, 0 },
                                   { 1, 0 },
                                   { 0, 1 },
