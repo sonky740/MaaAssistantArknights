@@ -14,7 +14,7 @@
         {
             "name": "随到随取",
             "option_num": 2,
-            "choose": 2,
+            "choose": 1,
             "choices": [
                 {
                     "name": "使用热像仪",
