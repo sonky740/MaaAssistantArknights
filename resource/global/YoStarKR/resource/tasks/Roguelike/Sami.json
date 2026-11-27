@@ -1,4 +1,14 @@
 {
+    "Sami@RoguelikeSettlementNextPage": {
+        "algorithm": "MatchTemplate",
+        "roi": [1188, 306, 90, 110],
+        "templThreshold": 0.92
+    },
+    "Sami@RoguelikeSettlementRecordPopup": {
+        "algorithm": "MatchTemplate",
+        "roi": [571, 353, 154, 66],
+        "templThreshold": 0.92
+    },
     "Sami@Roguelike@StageEncounterFixedLayoutHeader": {
         "algorithm": "MatchTemplate",
         "roi": [1237, 65, 41, 560],

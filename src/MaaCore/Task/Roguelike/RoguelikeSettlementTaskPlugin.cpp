@@ -38,28 +38,42 @@ bool asst::RoguelikeSettlementTaskPlugin::_run()
     auto json_msg = basic_info_with_what("RoguelikeSettlement");
     json_msg["details"]["game_pass"] = m_game_pass;
 
-    sleep(task->special_params[0]);
-    if (m_game_pass) {
-        save_img(ctrler()->get_image(), utils::path("achievement") / utils::path("roguelike"), "Page1");
+    if (!sleep(task->special_params[0])) {
+        return true;
     }
 
-    const auto& rect = Task.get("Roguelike@ClickToStartPoint")->specific_rect;
-    ctrler()->click(rect);
-    sleep(task->pre_delay);
+    cv::Mat image;
+    static const std::string next_page_task = "Sami@RoguelikeSettlementNextPage";
+    if (m_config->get_theme() == RoguelikeTheme::Sami && Task.is_explicit_task(next_page_task)) {
+        image = read_sami_settlement_page(next_page_task);
+    }
+    else {
+        if (m_game_pass) {
+            save_img(ctrler()->get_image(), utils::path("achievement") / utils::path("roguelike"), "Page1");
+        }
+        const auto& rect = Task.get("Roguelike@ClickToStartPoint")->specific_rect;
+        ctrler()->click(rect);
+        if (sleep(task->pre_delay) && wait_for_whole_page() && sleep(task->post_delay)) {
+            image = ctrler()->get_image();
+        }
+    }
 
-    if (!wait_for_whole_page()) {
+    if (need_exit()) {
+        return true;
+    }
+    if (image.empty()) {
         Log.error(__FUNCTION__, "wait for whole page failed");
         save_img(ctrler()->get_image(), utils::path("debug") / utils::path("roguelike"), "Page2_Error");
         return true;
     }
-    sleep(task->post_delay);
-    auto image = ctrler()->get_image();
 
     if (m_game_pass) {
         save_img(image, utils::path("achievement") / utils::path("roguelike"), "Page2");
     }
     get_settlement_info(json_msg, image);
-    callback(AsstMsg::SubTaskExtraInfo, json_msg);
+    if (!need_exit()) {
+        callback(AsstMsg::SubTaskExtraInfo, json_msg);
+    }
     return true;
 }
 
@@ -148,6 +162,65 @@ bool asst::RoguelikeSettlementTaskPlugin::wait_for_whole_page()
         sleep(Config.get_options().task_delay);
     } while (!need_exit() && retry < 20);
     return false;
+}
+
+cv::Mat asst::RoguelikeSettlementTaskPlugin::read_sami_settlement_page(const std::string& next_page_task)
+{
+    const auto timing = Task.get("RoguelikeSettlementConfirm");
+    const std::string heading = m_game_pass ? "Sami@Roguelike@GamePass" : "Sami@Roguelike@MissionFailedFlag2";
+    bool advanced = false;
+    bool result_seen = false;
+    int retries = 0;
+    while (retries < 20 && !need_exit()) {
+        const auto frame = ctrler()->get_image_if_available();
+        if (frame.empty()) {
+            break;
+        }
+        Matcher matcher(frame);
+        matcher.set_task_info(heading);
+        if (matcher.analyze()) {
+            matcher.set_task_info("Sami@RoguelikeSettlementConfirm");
+            if (matcher.analyze()) {
+                if (result_seen) {
+                    return frame;
+                }
+                result_seen = true;
+                if (!sleep(timing->post_delay)) {
+                    break;
+                }
+                continue;
+            }
+            if (!advanced && !result_seen) {
+                matcher.set_task_info(next_page_task);
+                if (const auto next = matcher.analyze(); next && !need_exit()) {
+                    if (m_game_pass) {
+                        save_img(frame, utils::path("achievement") / utils::path("roguelike"), "Page1");
+                    }
+                    if (need_exit() || !ctrler()->click(next->rect) || !sleep(timing->pre_delay)) {
+                        break;
+                    }
+                    advanced = true;
+                    continue;
+                }
+            }
+        }
+        else {
+            matcher.set_task_info("Sami@Roguelike@StartExplore");
+            if (matcher.analyze()) {
+                break;
+            }
+            matcher.set_task_info("Sami@RoguelikeSettlementRecordPopup");
+            if (matcher.analyze()) {
+                LogInfo << __FUNCTION__ << "Sami expedition record is already open";
+                break;
+            }
+        }
+        ++retries;
+        if (!sleep(Config.get_options().task_delay)) {
+            break;
+        }
+    }
+    return {};
 }
 
 void asst::RoguelikeSettlementTaskPlugin::save_img(

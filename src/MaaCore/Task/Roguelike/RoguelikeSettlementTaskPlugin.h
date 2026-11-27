@@ -14,6 +14,7 @@ public:
 private:
     virtual bool _run() override;
     bool get_settlement_info(json::value& info, const cv::Mat& image);
+    cv::Mat read_sami_settlement_page(const std::string& next_page_task);
     bool wait_for_whole_page();
     void save_img(const cv::Mat& image, const std::filesystem::path& path, std::string name);
 

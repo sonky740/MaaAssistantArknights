@@ -29,6 +29,16 @@ button="$kr/resource/template/Roguelike/Sami/Sami@Roguelike@StageEncounterLeaveC
 "$scratch/encounter_selection_replay" "$scratch/capture" "$PWD" "$kr" Sami "$button" "$frame" 鲍勃杂货店 3 3 blocked
 ```
 
+### Korean Sami settlement
+
+Pass private captures of the first page, the loading result, the completed result, the expedition record popup, and the Sami start screen. Pass the score and experience text from the completed result. Append `win` for a successful expedition. The replay expects one advance from the first page and no input on the other screens.
+
+```sh
+mkdir -p "$scratch/settlement"
+"$scratch/sami_settlement_replay" "$scratch/settlement" "$PWD" "$PWD/resource/global/YoStarKR" \
+  "$first_png" "$loading_png" "$result_png" "$popup_png" "$home_png" 15 +17
+```
+
 ### Korean authentication failure
 
 The native fallback replay checks two consecutive authentication failures and the next successful run for each theme. The JieGarden case also moves the dialog into the copper plugin, including the one-second delay between recognizing the exchange button and clicking it. The expected input count on the dialog is zero. The default run builds the dialog from the Korean text template. To substitute a private 1280×720 capture, use the binary in the temporary directory printed by the runner:

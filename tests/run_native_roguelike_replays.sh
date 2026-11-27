@@ -43,6 +43,7 @@ compile sami_reward_replay
 compile formation_reselect_replay
 compile encounter_selection_replay
 compile encounter_fallback_replay
+compile sami_settlement_replay
 run_theme() {
     theme=$1
     run_case formation_reselect_replay "$theme-reselect" "$2" "$3" "$theme"
